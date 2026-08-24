@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Foundry workspace (Solidity sources, build artifacts, vendored deps):
+    "contracts/**",
+    ".agents/**",
   ]),
 ]);
 
