@@ -157,7 +157,7 @@ export default function FleetDeck() {
     setMarketStatus("loading");
     setMarketError("");
     try {
-      const rows = await listLiveMarkets();
+      const rows = (await listLiveMarkets()).filter((row) => row.executionReady !== false && (row.executionMode === "chain-pool" || Boolean(row.yesSymbol)));
       setMarkets(rows);
       setDraft((current) => (current.marketId && rows.some((row) => row.id === current.marketId) ? current : { ...current, marketId: rows[0]?.id ?? "" }));
       setMarketStatus("ready");
@@ -283,7 +283,7 @@ export default function FleetDeck() {
           const current = previous[cat.slot] ?? { book: EMPTY_BOOK, fills: [] };
           return { ...previous, [cat.slot]: { ...current, ...patch } };
         });
-      const stopBook = watchBook(market.yesSymbol, (book) => apply({ book }));
+      const stopBook = watchBook(market.yesSymbol, (book) => apply({ book }), market);
       const stopFills = watchFills(market.yesSymbol, (fills) => apply({ fills }));
       stopsRef.current.set(cat.slot, [stopBook, stopFills]);
     }

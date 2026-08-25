@@ -13,6 +13,9 @@
 # testing
 /coverage
 
+# local agent skills
+/.agents/skills/
+
 # next.js
 /.next/
 /out/

@@ -2,6 +2,10 @@
 
 import { SOMNIA_TESTNET_ADDRESSES, SomniaMarkets, isBinaryMarket } from "@somnia-chain/markets-sdk";
 import { somniaShannon } from "@somnia-chain/markets-sdk/chains";
+import { fetchChainOrderBook, resolveChainExecutionMarket } from "./market-universe/chain-execution";
+import type { LiveMarketRow, MarketsResponse } from "./market-universe/types";
+
+export type { LiveMarketRow } from "./market-universe/types";
 
 const INDEXER_URL = process.env.NEXT_PUBLIC_INDEXER_URL ?? "https://dev.smk.somnia.host/v1/graphql";
 const WS_RPC_URL = process.env.NEXT_PUBLIC_WS_RPC_URL ?? "wss://api.infra.testnet.somnia.network/ws";
@@ -22,23 +26,6 @@ function getClient() {
 
 export function getExchange(): SomniaMarkets {
   return getClient();
-}
-
-export interface LiveMarketRow {
-  id: string;
-  poolAddress: string;
-  asset: string;
-  kind: "ladder" | "open";
-  strikeLabel: string;
-  windowLabel: string;
-  interval: string;
-  expiry: number;
-  status: string;
-  question: string;
-  volumeQuote: number;
-  tradeCount: number;
-  lastPrice: number | null;
-  yesSymbol: string;
 }
 
 type LoadedMarket = Awaited<ReturnType<SomniaMarkets["loadMarkets"]>>[string];
@@ -62,19 +49,50 @@ function parseRow(m: LoadedMarket): LiveMarketRow | null {
     expiry: Number(i.expiry) * 1000,
     status: String(i.status),
     question: String(i.question ?? ""),
-    volumeQuote: Number(i.cumulativeQuoteVolume ?? 0) / 1e6,
+    volumeQuote: Number(i.cumulativeQuoteVolume ?? 0) / 10 ** (i.quoteDecimals ?? 6),
     tradeCount: Number(i.tradeCount ?? 0),
-    lastPrice: i.lastPrice == null ? null : Number(i.lastPrice) / 1e6,
+    lastPrice: i.lastPrice == null ? null : Number(i.lastPrice) / 10 ** (i.quoteDecimals ?? 6),
     yesSymbol: yes?.symbol ?? "",
+    source: "indexer",
+    trust: "attested",
+    sdkReady: true,
+    executionMode: "sdk-symbol",
+    executionReady: Boolean(yes?.symbol),
   };
 }
 
-export async function listLiveMarkets(): Promise<LiveMarketRow[]> {
+async function listSdkMarkets(): Promise<LiveMarketRow[]> {
   const markets = Object.values(await getClient().loadMarkets(true));
   return markets
     .map(parseRow)
     .filter((r): r is LiveMarketRow => r !== null && r.status === "Trading")
     .sort((a, b) => b.volumeQuote - a.volumeQuote);
+}
+
+export async function listLiveMarkets(): Promise<LiveMarketRow[]> {
+  if (typeof window !== "undefined") {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const response = await fetch("/api/markets", {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (response.ok) {
+        const data = await response.json() as MarketsResponse;
+        if (Array.isArray(data.markets)) {
+          if (data.meta?.degraded && data.markets.length === 0) {
+            throw new Error(data.meta.error ?? "DreamDEX market discovery is degraded.");
+          }
+          return data.markets;
+        }
+      }
+    } catch {
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  return listSdkMarkets();
 }
 
 export interface BookLevel {
@@ -110,6 +128,7 @@ function snapshotFrom(bids: BookLevel[], asks: BookLevel[]): BookSnapshot {
 }
 
 export async function fetchBook(yesSymbol: string): Promise<BookSnapshot> {
+  if (!yesSymbol) throw new Error("Market execution metadata is still indexing");
   const raw = await getClient().fetchOrderBook(yesSymbol, 8);
   return snapshotFrom(
     raw.bids.map(([price, qty]) => ({ price, qty })),
@@ -128,8 +147,29 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function watchBook(
   yesSymbol: string,
-  onBook: (b: BookSnapshot) => void
+  onBook: (b: BookSnapshot) => void,
+  market?: LiveMarketRow,
 ): () => void {
+  if (market?.executionMode === "chain-pool" && market.executionReady) {
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const pump = async () => {
+      try {
+        const resolved = await resolveChainExecutionMarket(market.id, market);
+        const book = await fetchChainOrderBook(resolved);
+        if (alive) onBook(book);
+      } catch {
+      } finally {
+        if (alive) timer = setTimeout(pump, 2_000);
+      }
+    };
+    void pump();
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
+  }
+  if (!yesSymbol) return () => {};
   let alive = true;
   (async () => {
     while (alive) {
@@ -153,6 +193,7 @@ export function watchBook(
 }
 
 export function watchFills(yesSymbol: string, onFills: (f: Fill[]) => void): () => void {
+  if (!yesSymbol) return () => {};
   let alive = true;
   (async () => {
     while (alive) {

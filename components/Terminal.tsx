@@ -229,11 +229,11 @@ export default function Terminal() {
   const outcomeMid = book?.mid == null ? null : outcome === "YES" ? book.mid : 1 - book.mid;
 
   useEffect(() => {
-    if (!selected) return;
+    if (!selected || selected.executionReady === false) return;
     const id = selected.id;
     const stopBook = watchBook(selected.yesSymbol, (b) => {
       if (b.bids.length || b.asks.length) setBookState({ id, book: b });
-    });
+    }, selected);
     const stopFills = watchFills(selected.yesSymbol, (f) => setFillsState({ id, fills: f }));
     return () => {
       stopBook();
@@ -283,6 +283,8 @@ export default function Terminal() {
   const formError = useMemo(() => {
     if (!selected) return "Select a live market first.";
     if (selected.status !== "Trading") return "This market is no longer trading.";
+    if (selected.executionReady === false) return "This market was discovered on-chain; execution metadata is still indexing.";
+    if (selected.executionMode !== "chain-pool" && !selected.yesSymbol) return "This market has no executable outcome symbol yet.";
     const amountValue = Number(amount);
     if (!amount.trim() || !Number.isFinite(amountValue) || amountValue <= 0) return "Enter an amount greater than zero.";
     if (orderType === "limit") {
@@ -310,7 +312,8 @@ export default function Terminal() {
       : formError?.startsWith("Slippage")
         ? "slippage"
         : null;
-  const showFormError = Boolean(formError && (orderAttempted || (errorField && touchedFields[errorField])));
+  const marketUnavailable = formError?.startsWith("This market") ?? false;
+  const showFormError = Boolean(formError && (orderAttempted || marketUnavailable || (errorField && touchedFields[errorField])));
 
   const submitOrder = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -325,6 +328,7 @@ export default function Terminal() {
         side: orderSide,
         type: orderType,
         amount,
+        ...(selected.executionMode === "chain-pool" ? { chainContext: selected } : {}),
         ...(orderType === "limit" ? { price: Number(price) / 100 } : { slippage: Number(slippage) / 100 }),
       };
       const order = await placeManualTrade(walletClient, input);

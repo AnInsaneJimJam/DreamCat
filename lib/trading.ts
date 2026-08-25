@@ -3,6 +3,12 @@
 import { InvalidInputError, type UnifiedOrder } from "@somnia-chain/markets-sdk";
 import type { Hex, WalletClient } from "viem";
 import { getExchange } from "./dreamdex";
+import {
+  chainOutcomeSymbol,
+  placeChainTrade,
+  resolveChainExecutionMarket,
+  type ChainMarketExpectation,
+} from "./market-universe/chain-execution";
 
 const SHANNON_CHAIN_ID = 50312;
 const MARKET_ID_PATTERN = /^0x[0-9a-f]{64}$/i;
@@ -20,6 +26,7 @@ export interface ManualTradeInput {
   amount: string | number;
   price?: string | number;
   slippage?: string | number;
+  chainContext?: ChainMarketExpectation;
 }
 
 export interface ValidatedManualTrade {
@@ -112,6 +119,28 @@ export async function resolveExecutableMarket(
   return { marketId: id, outcome, symbol: tradable.symbol, pool: state.pool, expiry: Number(state.expiry) };
 }
 
+export async function resolveChainExecutableMarket(
+  marketId: string,
+  outcome: ManualTradeOutcome = "YES",
+  context?: ChainMarketExpectation,
+): Promise<ExecutableMarket> {
+  if (outcome !== "YES" && outcome !== "NO") throw new InvalidInputError("outcome must be YES or NO");
+  const market = await resolveChainExecutionMarket(marketId, context);
+  const symbol = outcome === "YES" ? context?.yesSymbol : context?.noSymbol;
+  return {
+    marketId: market.marketId,
+    outcome,
+    symbol: symbol ?? chainOutcomeSymbol(market.marketId, outcome, {
+      asset: context?.asset ?? undefined,
+      strike: context?.strike ?? undefined,
+      expiry: context?.expiry == null ? undefined : context.expiry / 1000,
+      quote: context?.quoteSymbol ?? undefined,
+    }),
+    pool: market.pool,
+    expiry: market.expiry,
+  };
+}
+
 function marketIdValue(value: string): string {
   return marketId(value).toLowerCase();
 }
@@ -133,7 +162,35 @@ export async function placeManualTrade(
     throw new InvalidInputError("wallet account changed; reconnect before trading");
   }
   const trade = validateManualTrade(input);
-  const executable = await resolveExecutableMarket(trade.marketId, trade.outcome);
+  if (input.chainContext) {
+    return placeChainTrade(walletClient, {
+      marketId: trade.marketId,
+      outcome: trade.outcome,
+      side: trade.side,
+      type: trade.type,
+      amount: trade.amount,
+      price: trade.price,
+      slippage: trade.slippage,
+    }, input.chainContext);
+  }
+  let executable: ExecutableMarket;
+  try {
+    executable = await resolveExecutableMarket(trade.marketId, trade.outcome);
+  } catch (officialError) {
+    try {
+      return await placeChainTrade(walletClient, {
+        marketId: trade.marketId,
+        outcome: trade.outcome,
+        side: trade.side,
+        type: trade.type,
+        amount: trade.amount,
+        price: trade.price,
+        slippage: trade.slippage,
+      });
+    } catch {
+      throw officialError;
+    }
+  }
   const exchange = getExchange();
   exchange.setSigner({ walletClient });
   const order = await exchange.createOrder(

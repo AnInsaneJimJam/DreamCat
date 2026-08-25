@@ -113,7 +113,7 @@ export default function StrategyLab() {
     setMarketStatus("loading");
     setMarketError("");
     try {
-      const rows = await listLiveMarkets();
+      const rows = (await listLiveMarkets()).filter((row) => row.executionReady !== false && (row.executionMode === "chain-pool" || Boolean(row.yesSymbol)));
       setMarkets(rows);
       setSelectedId((current) => (current && rows.some((row) => row.id === current) ? current : (rows[0]?.id ?? null)));
       setMarketStatus("ready");
@@ -142,7 +142,7 @@ export default function StrategyLab() {
         bookRef.current = nextBook;
         setBook(nextBook);
       }
-    });
+    }, selected);
     const stopFills = watchFills(selected.yesSymbol, (fills) => {
       fillsRef.current = fills;
     });
