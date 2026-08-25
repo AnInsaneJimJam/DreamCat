@@ -15,6 +15,7 @@ import {
   TrendUp,
 } from "@phosphor-icons/react";
 import { bucketStartFor, fetchCandles, watchSpot, type SpotTick, type Timeframe } from "@/lib/prices";
+import type { SpotAsset } from "@/lib/spot-flow";
 
 const TFS: Timeframe[] = ["1m", "5m", "15m", "1h", "1d"];
 
@@ -100,8 +101,12 @@ function drawingCallbacks(chart: Chart, groupId: string, onDrawEnd?: () => void)
   };
 }
 
-export default function PriceChart() {
-  const [asset, setAsset] = useState<"BTC" | "ETH">("BTC");
+interface PriceChartProps {
+  asset: SpotAsset;
+  onAssetChange: (asset: SpotAsset) => void;
+}
+
+export default function PriceChart({ asset, onAssetChange }: PriceChartProps) {
   const [tf, setTf] = useState<Timeframe>("1m");
   const [spot, setSpot] = useState<Record<string, SpotTick>>({});
   const [tool, setTool] = useState<string | null>(null);
@@ -403,7 +408,7 @@ export default function PriceChart() {
             {(["BTC", "ETH"] as const).map((a) => (
               <button
                 key={a}
-                onClick={() => setAsset(a)}
+                onClick={() => onAssetChange(a)}
                 type="button"
                 aria-pressed={asset === a}
                 className={`num min-h-11 cursor-pointer rounded-md px-2.5 py-1 text-xs font-semibold ease-terminal transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/70 focus-visible:ring-offset-1 focus-visible:ring-offset-panel-raised md:min-h-9 ${

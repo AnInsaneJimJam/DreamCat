@@ -6,9 +6,11 @@ import { somniaShannon } from "@somnia-chain/markets-sdk/chains";
 import { CaretDown, Wallet } from "@phosphor-icons/react";
 import { useNow } from "@/lib/use-now";
 import PriceChart from "@/components/PriceChart";
+import SpotFlowPanel from "@/components/SpotFlowPanel";
 import AppChrome from "@/components/AppChrome";
 import { getExchange, listLiveMarkets, watchBook, watchFills, type BookSnapshot, type Fill, type LiveMarketRow } from "@/lib/dreamdex";
 import { placeManualTrade, type ManualTradeInput } from "@/lib/trading";
+import type { SpotAsset } from "@/lib/spot-flow";
 
 const fmtCompact = (n: number) =>
   Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n);
@@ -189,6 +191,7 @@ export default function Terminal() {
   const [lastOrder, setLastOrder] = useState<LastOrder | null>(null);
   const [touchedFields, setTouchedFields] = useState<Record<OrderField, boolean>>({ amount: false, price: false, slippage: false });
   const [orderAttempted, setOrderAttempted] = useState(false);
+  const [chartAsset, setChartAsset] = useState<SpotAsset>("BTC");
   const now = useNow();
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
@@ -415,7 +418,10 @@ export default function Terminal() {
       </div>
 
       <main className="flex min-w-0 max-w-full flex-1 flex-col gap-3 overflow-x-hidden p-3">
-        <PriceChart />
+        <div className="grid min-w-0 items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
+          <PriceChart asset={chartAsset} onAssetChange={setChartAsset} />
+          <SpotFlowPanel asset={chartAsset} />
+        </div>
         <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="order-2 min-w-0 lg:order-1">
         <Panel title={`Event contracts / ${visible.length} of ${markets.length} live`}>
