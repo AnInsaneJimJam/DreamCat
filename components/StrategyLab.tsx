@@ -105,22 +105,32 @@ export default function StrategyLab() {
   const [book, setBook] = useState<BookSnapshot | null>(null);
   const bookRef = useRef<BookSnapshot | null>(null);
   const fillsRef = useRef<Fill[]>([]);
+  const marketsRef = useRef(markets);
+  const refreshingRef = useRef(false);
   const now = useNow();
+
+  useEffect(() => {
+    marketsRef.current = markets;
+  }, [markets]);
 
   const template = useMemo(() => TEMPLATES.find((t) => t.archetype === archetype)!, [archetype]);
 
   const refreshMarkets = useCallback(async () => {
-    setMarketStatus("loading");
-    setMarketError("");
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
     try {
       const rows = (await listLiveMarkets()).filter((row) => row.executionReady !== false && (row.executionMode === "chain-pool" || Boolean(row.yesSymbol)));
       setMarkets(rows);
       setSelectedId((current) => (current && rows.some((row) => row.id === current) ? current : (rows[0]?.id ?? null)));
       setMarketStatus("ready");
+      setMarketError("");
     } catch {
-      setMarkets([]);
-      setMarketStatus("error");
-      setMarketError("The market feed did not respond. Try again when the Somnia indexer is available.");
+      if (marketsRef.current.length === 0) {
+        setMarketStatus("error");
+        setMarketError("The market feed did not respond. Try again when the Somnia indexer is available.");
+      }
+    } finally {
+      refreshingRef.current = false;
     }
   }, []);
 

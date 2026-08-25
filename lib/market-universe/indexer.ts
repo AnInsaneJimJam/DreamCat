@@ -791,7 +791,50 @@ export function mergeMarketRows(
   return rows.sort((a, b) => b.volumeQuote - a.volumeQuote || a.expiry - b.expiry);
 }
 
+const MARKETS_TTL_MS = envInteger("DREAMDEX_MARKETS_RESPONSE_TTL_MS", 4_000);
+
+let lastResponse: { at: number; value: MarketsResponse } | null = null;
+let universePromise: Promise<MarketsResponse> | null = null;
+
+function staleCopy(entry: { at: number; value: MarketsResponse }): MarketsResponse {
+  const now = Date.now();
+  const markets = entry.value.markets.filter((market) => market.expiry > now);
+  return {
+    markets,
+    meta: { ...entry.value.meta, mergedCount: markets.length, stale: true, ageMs: now - entry.at },
+  };
+}
+
+function refreshMarketUniverse(): Promise<MarketsResponse> {
+  if (!universePromise) {
+    universePromise = computeMarketUniverse()
+      .then((value) => {
+        if (value.markets.length > 0 || lastResponse === null) lastResponse = { at: Date.now(), value };
+        return value;
+      })
+      .finally(() => {
+        universePromise = null;
+      });
+    universePromise.catch(() => undefined);
+  }
+  return universePromise;
+}
+
 export async function getMarketUniverse(): Promise<MarketsResponse> {
+  const cached = lastResponse;
+  if (cached && Date.now() - cached.at < MARKETS_TTL_MS) return cached.value;
+  const refresh = refreshMarketUniverse();
+  if (cached) return staleCopy(cached);
+  try {
+    return await refresh;
+  } catch (cause) {
+    const fallback = lastResponse;
+    if (fallback) return staleCopy(fallback);
+    throw cause;
+  }
+}
+
+async function computeMarketUniverse(): Promise<MarketsResponse> {
   const [officialResult, chainResult] = await Promise.allSettled([loadOfficialMarkets(), syncChainMarkets()]);
   const official = officialResult.status === "fulfilled" ? officialResult.value : [];
   const chain = chainResult.status === "fulfilled"

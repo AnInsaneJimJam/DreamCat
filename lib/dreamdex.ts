@@ -28,6 +28,25 @@ export function getExchange(): SomniaMarkets {
   return getClient();
 }
 
+const REGISTRY_TTL_MS = 30_000;
+
+let registryPromise: Promise<unknown> | null = null;
+let registryLoadedAt = 0;
+
+async function ensureRegistryLoaded(): Promise<void> {
+  if (registryPromise && Date.now() - registryLoadedAt < REGISTRY_TTL_MS) {
+    await registryPromise;
+    return;
+  }
+  registryLoadedAt = Date.now();
+  registryPromise = getClient().loadMarkets(true).catch((error) => {
+    registryPromise = null;
+    registryLoadedAt = 0;
+    throw error;
+  });
+  await registryPromise;
+}
+
 type LoadedMarket = Awaited<ReturnType<SomniaMarkets["loadMarkets"]>>[string];
 
 function parseRow(m: LoadedMarket): LiveMarketRow | null {
@@ -72,7 +91,7 @@ async function listSdkMarkets(): Promise<LiveMarketRow[]> {
 export async function listLiveMarkets(): Promise<LiveMarketRow[]> {
   if (typeof window !== "undefined") {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5_000);
+    const timeout = setTimeout(() => controller.abort(), 15_000);
     try {
       const response = await fetch("/api/markets", {
         cache: "no-store",
@@ -129,6 +148,7 @@ function snapshotFrom(bids: BookLevel[], asks: BookLevel[]): BookSnapshot {
 
 export async function fetchBook(yesSymbol: string): Promise<BookSnapshot> {
   if (!yesSymbol) throw new Error("Market execution metadata is still indexing");
+  await ensureRegistryLoaded();
   const raw = await getClient().fetchOrderBook(yesSymbol, 8);
   return snapshotFrom(
     raw.bids.map(([price, qty]) => ({ price, qty })),
@@ -174,6 +194,7 @@ export function watchBook(
   (async () => {
     while (alive) {
       try {
+        await ensureRegistryLoaded();
         const raw = await getClient().watchOrderBook(yesSymbol, 8);
         if (!alive) return;
         onBook(
@@ -198,6 +219,7 @@ export function watchFills(yesSymbol: string, onFills: (f: Fill[]) => void): () 
   (async () => {
     while (alive) {
       try {
+        await ensureRegistryLoaded();
         const raw = await getClient().watchTrades(yesSymbol, 20);
         if (!alive) return;
         onFills(

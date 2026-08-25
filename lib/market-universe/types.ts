@@ -157,6 +157,8 @@ export interface MarketsResponseMeta {
   degraded: boolean;
   error: string | null;
   chainExecutionReadyCount?: number;
+  stale?: boolean;
+  ageMs?: number;
 }
 
 export interface MarketsResponse {

@@ -13,16 +13,9 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import AppChrome from "@/components/AppChrome";
-import {
-  listLiveMarkets,
-  watchBook,
-  watchFills,
-  type BookSnapshot,
-  type Fill,
-  type LiveMarketRow,
-} from "@/lib/dreamdex";
+import { listLiveMarkets, type LiveMarketRow } from "@/lib/dreamdex";
 import { TEMPLATES } from "@/lib/strategy";
 import { useNow } from "@/lib/use-now";
 import {
@@ -31,21 +24,22 @@ import {
   catEquity,
   fleetSummary,
   freshCat,
-  tickFleet,
   totalAlloc,
   type FleetCat,
 } from "@/lib/fleet";
-
-const STORAGE_KEY = "dreamcat-fleet-v1";
-const EMPTY_BOOK: BookSnapshot = {
-  bids: [],
-  asks: [],
-  bidDepth: 0,
-  askDepth: 0,
-  mid: null,
-  spread: null,
-  imbalance: null,
-};
+import {
+  EMPTY_BOOK,
+  acknowledgeDroppedPositions,
+  getFleetServerState,
+  getFleetState,
+  hydrateFleet,
+  removeFleetCat,
+  setFleetBankroll,
+  setFleetMarkets,
+  setFleetRunning,
+  subscribeFleet,
+  updateFleetCats,
+} from "@/lib/fleet-runner";
 
 const fmtProb = (n: number) => `${(n * 100).toFixed(1)}%`;
 
@@ -104,67 +98,47 @@ interface Draft {
 type MarketStatus = "loading" | "ready" | "error";
 
 export default function FleetDeck() {
+  const fleet = useSyncExternalStore(subscribeFleet, getFleetState, getFleetServerState);
+  const { cats, running, bankroll, live: liveData, hydrated: storageReady, droppedPositions } = fleet;
   const [markets, setMarkets] = useState<LiveMarketRow[]>([]);
   const [marketStatus, setMarketStatus] = useState<MarketStatus>("loading");
   const [marketError, setMarketError] = useState("");
-  const [cats, setCats] = useState<FleetCat[]>([]);
-  const [storageReady, setStorageReady] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [bankroll, setBankroll] = useState(1000);
   const [published, setPublished] = useState<Record<number, "sending" | "done" | "fail">>({});
   const [draft, setDraft] = useState<Draft>({ persona: 0, marketId: "", allocPct: 20, orderSize: 5 });
   const [draftError, setDraftError] = useState("");
-  const [liveData, setLiveData] = useState<Record<number, { book: BookSnapshot; fills: Fill[] }>>({});
-  const liveRef = useRef(liveData);
-  const stopsRef = useRef(new Map<number, (() => void)[]>());
+  const marketsRef = useRef(markets);
+  const refreshingRef = useRef(false);
   const now = useNow();
 
   useEffect(() => {
-    liveRef.current = liveData;
-  }, [liveData]);
+    marketsRef.current = markets;
+  }, [markets]);
 
   useEffect(() => {
-    const kick = setTimeout(() => {
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          const parsed = JSON.parse(saved) as { cats: FleetCat[] };
-          if (Array.isArray(parsed.cats)) setCats(parsed.cats.map((cat) => ({ ...cat, sim: { ...cat.sim, log: [] } })));
-        }
-      } catch {
-        setDraftError("Saved fleet data could not be read. A new local fleet is ready.");
-      } finally {
-        setStorageReady(true);
-      }
-    }, 0);
+    const kick = setTimeout(hydrateFleet, 0);
     return () => clearTimeout(kick);
   }, []);
 
   useEffect(() => {
-    if (!storageReady) return;
-    let errorTimer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ cats }));
-    } catch {
-      errorTimer = setTimeout(() => setDraftError("Fleet changes could not be saved locally."), 0);
-    }
-    return () => {
-      if (errorTimer) clearTimeout(errorTimer);
-    };
-  }, [cats, storageReady]);
+    setFleetMarkets(markets);
+  }, [markets]);
 
   const refreshMarkets = useCallback(async () => {
-    setMarketStatus("loading");
-    setMarketError("");
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
     try {
       const rows = (await listLiveMarkets()).filter((row) => row.executionReady !== false && (row.executionMode === "chain-pool" || Boolean(row.yesSymbol)));
       setMarkets(rows);
       setDraft((current) => (current.marketId && rows.some((row) => row.id === current.marketId) ? current : { ...current, marketId: rows[0]?.id ?? "" }));
       setMarketStatus("ready");
+      setMarketError("");
     } catch {
-      setMarkets([]);
-      setMarketStatus("error");
-      setMarketError("The market feed did not respond. Try again when the Somnia indexer is available.");
+      if (marketsRef.current.length === 0) {
+        setMarketStatus("error");
+        setMarketError("The market feed did not respond. Try again when the Somnia indexer is available.");
+      }
+    } finally {
+      refreshingRef.current = false;
     }
   }, []);
 
@@ -186,7 +160,7 @@ export default function FleetDeck() {
         localStorage.removeItem("dreamcat-pending-clone");
         const cat = JSON.parse(raw) as FleetCat;
         if (cats.length >= MAX_CATS) return;
-        setCats((current) =>
+        updateFleetCats((current) =>
           current.some((item) => item.slot === cat.slot)
             ? current
             : [...current, { ...cat, marketId: cat.marketId || markets[0].id, sim: { ...cat.sim, position: null, log: [] } }]
@@ -197,14 +171,6 @@ export default function FleetDeck() {
     }, 200);
     return () => clearTimeout(kick);
   }, [markets, cats.length]);
-
-  useEffect(() => {
-    if (!running) return;
-    const timer = setInterval(() => {
-      setCats((current) => tickFleet({ cats: current, data: new Map(Object.entries(liveRef.current).map(([key, value]) => [Number(key), value])), bankroll, now: Date.now() }));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [running, bankroll]);
 
   const deployCat = useCallback(() => {
     setDraftError("");
@@ -231,23 +197,8 @@ export default function FleetDeck() {
       marketId: draft.marketId,
       allocPct: draft.allocPct,
     });
-    setCats((current) => [...current, cat]);
+    updateFleetCats((current) => [...current, cat]);
   }, [cats, draft]);
-
-  const stopWatches = useCallback((slot: number) => {
-    stopsRef.current.get(slot)?.forEach((stop) => stop());
-    stopsRef.current.delete(slot);
-    setLiveData((previous) => {
-      const next = { ...previous };
-      delete next[slot];
-      return next;
-    });
-  }, []);
-
-  const removeCat = useCallback((slot: number) => {
-    stopWatches(slot);
-    setCats((current) => current.filter((cat) => cat.slot !== slot));
-  }, [stopWatches]);
 
   const publishCat = useCallback(async (cat: FleetCat) => {
     setPublished((current) => ({ ...current, [cat.slot]: "sending" }));
@@ -271,31 +222,6 @@ export default function FleetDeck() {
       setPublished((current) => ({ ...current, [cat.slot]: "fail" }));
     }
   }, [markets]);
-
-  useEffect(() => {
-    if (!running) return;
-    for (const cat of cats) {
-      if (stopsRef.current.has(cat.slot)) continue;
-      const market = markets.find((item) => item.id === cat.marketId);
-      if (!market) continue;
-      const apply = (patch: Partial<{ book: BookSnapshot; fills: Fill[] }>) =>
-        setLiveData((previous) => {
-          const current = previous[cat.slot] ?? { book: EMPTY_BOOK, fills: [] };
-          return { ...previous, [cat.slot]: { ...current, ...patch } };
-        });
-      const stopBook = watchBook(market.yesSymbol, (book) => apply({ book }), market);
-      const stopFills = watchFills(market.yesSymbol, (fills) => apply({ fills }));
-      stopsRef.current.set(cat.slot, [stopBook, stopFills]);
-    }
-    for (const slot of [...stopsRef.current.keys()]) {
-      if (!cats.some((cat) => cat.slot === slot)) stopWatches(slot);
-    }
-  }, [running, cats, markets, stopWatches]);
-
-  useEffect(() => {
-    if (running) return;
-    for (const slot of [...stopsRef.current.keys()]) stopWatches(slot);
-  }, [running, stopWatches]);
 
   const summary = useMemo(
     () => fleetSummary(cats, new Map(cats.map((cat) => [cat.slot, { book: liveData[cat.slot]?.book ?? EMPTY_BOOK }])), bankroll),
@@ -335,7 +261,7 @@ export default function FleetDeck() {
             <p className="text-[10px] uppercase tracking-[0.16em] text-text-3">Bankroll</p>
             <label htmlFor="fleet-bankroll" className="sr-only">Fleet bankroll in tUSDC</label>
             <div className="mt-2 flex items-center gap-2">
-              <input id="fleet-bankroll" type="number" min={100} step={100} value={bankroll} onChange={(event) => setBankroll(Math.max(100, Number(event.target.value) || 100))} className="num min-h-11 min-w-0 w-full rounded-[var(--radius-control)] border border-line-strong bg-surface-1 px-2 text-lg font-semibold text-text-1 outline-none focus:border-brand" />
+              <input id="fleet-bankroll" type="number" min={100} step={100} value={bankroll} onChange={(event) => setFleetBankroll(Math.max(100, Number(event.target.value) || 100))} className="num min-h-11 min-w-0 w-full rounded-[var(--radius-control)] border border-line-strong bg-surface-1 px-2 text-lg font-semibold text-text-1 outline-none focus:border-brand" />
               <span className="num text-[10px] text-text-3">tUSDC</span>
             </div>
           </Panel>
@@ -352,7 +278,7 @@ export default function FleetDeck() {
             <p className="text-[10px] uppercase tracking-[0.16em] text-text-3">Fleet status</p>
             <div className="mt-3 flex items-center justify-between gap-2">
               <p className="text-sm font-semibold text-text-1">{running ? "Running" : "Paused"}</p>
-              <button type="button" aria-pressed={running} disabled={!cats.length} onClick={() => setRunning((current) => !current)} className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] px-3 text-xs font-semibold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40 ${running ? "bg-sell/[0.14] text-sell hover:bg-sell/[0.22]" : "bg-brand text-brand-ink hover:bg-brand-strong"}`}>
+              <button type="button" aria-pressed={running} disabled={!cats.length} onClick={() => setFleetRunning(!running)} className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] px-3 text-xs font-semibold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40 ${running ? "bg-sell/[0.14] text-sell hover:bg-sell/[0.22]" : "bg-brand text-brand-ink hover:bg-brand-strong"}`}>
                 {running ? <Stop aria-hidden="true" size={14} weight="fill" /> : <Play aria-hidden="true" size={14} weight="fill" />}
                 {running ? "Stop" : "Deploy"}
               </button>
@@ -368,6 +294,18 @@ export default function FleetDeck() {
             </div>
             <p className="num text-xs text-text-3">{cats.length}/{MAX_CATS} cats / {allocUsed}% allocated</p>
           </div>
+
+          {droppedPositions > 0 ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[var(--radius-panel)] border border-brand/40 bg-brand/[0.06] px-3 py-2 text-xs text-text-2" role="status">
+              <WarningCircle aria-hidden="true" className="shrink-0 text-brand" size={15} weight="fill" />
+              <span>
+                {droppedPositions === 1 ? "1 open paper position was" : `${droppedPositions} open paper positions were`} cleared on reload — they could not be marked against a live book from the previous session.
+              </span>
+              <button type="button" onClick={acknowledgeDroppedPositions} className="ml-auto min-h-11 cursor-pointer rounded-[var(--radius-control)] px-2 text-xs font-semibold text-brand hover:bg-brand/[0.12] md:min-h-9">
+                Dismiss
+              </button>
+            </div>
+          ) : null}
 
           {!storageReady ? (
             <div className="mt-3 flex min-h-32 items-center justify-center gap-2 rounded-[var(--radius-panel)] border border-line bg-surface-1 text-xs text-text-2">
@@ -401,7 +339,7 @@ export default function FleetDeck() {
                         <button type="button" onClick={() => void publishCat(cat)} disabled={publishState === "sending"} aria-label={publishState === "done" ? `Published ${cat.name} to board` : publishState === "fail" ? `Retry publishing ${cat.name}` : `Publish ${cat.name} to board`} className={`flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-[var(--radius-control)] transition-colors duration-150 disabled:cursor-wait disabled:opacity-50 ${publishState === "done" ? "text-buy" : publishState === "fail" ? "text-sell hover:bg-sell/[0.1]" : "text-text-3 hover:bg-surface-3 hover:text-brand"}`}>
                           {publishState === "sending" ? <CircleNotch aria-hidden="true" className="animate-spin" size={16} /> : publishState === "done" ? <Check aria-hidden="true" size={16} weight="bold" /> : publishState === "fail" ? <WarningCircle aria-hidden="true" size={16} weight="fill" /> : <UploadSimple aria-hidden="true" size={16} />}
                         </button>
-                        <button type="button" onClick={() => removeCat(cat.slot)} aria-label={`Remove ${cat.name} from fleet`} className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-[var(--radius-control)] text-text-3 transition-colors duration-150 hover:bg-sell/[0.1] hover:text-sell">
+                        <button type="button" onClick={() => removeFleetCat(cat.slot)} aria-label={`Remove ${cat.name} from fleet`} className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-[var(--radius-control)] text-text-3 transition-colors duration-150 hover:bg-sell/[0.1] hover:text-sell">
                           <Trash aria-hidden="true" size={16} />
                         </button>
                       </div>

@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { createWalletClient, custom, type Address, type EIP1193Provider, type WalletClient } from "viem";
-import { somniaShannon } from "@somnia-chain/markets-sdk/chains";
+import type { Address, WalletClient } from "viem";
 import { CaretDown, Wallet } from "@phosphor-icons/react";
 import { useNow } from "@/lib/use-now";
 import PriceChart from "@/components/PriceChart";
@@ -10,6 +9,20 @@ import SpotFlowPanel from "@/components/SpotFlowPanel";
 import AppChrome from "@/components/AppChrome";
 import { getExchange, listLiveMarkets, watchBook, watchFills, type BookSnapshot, type Fill, type LiveMarketRow } from "@/lib/dreamdex";
 import { placeManualTrade, type ManualTradeInput } from "@/lib/trading";
+import {
+  connectWalletProvider,
+  discoverWalletProviders,
+  ensureShannonChain,
+  forgetWalletProvider,
+  rememberWalletProvider,
+  rememberedWalletProvider,
+  restoreWalletProvider,
+  SHANNON_CHAIN_ID,
+  subscribeWalletEvents,
+  walletClientFor,
+  type WalletConnection,
+  type WalletProvider,
+} from "@/lib/wallet";
 import type { SpotAsset } from "@/lib/spot-flow";
 
 const fmtCompact = (n: number) =>
@@ -22,10 +35,6 @@ type OrderSide = "buy" | "sell";
 type OrderType = "limit" | "market";
 type OrderField = "amount" | "price" | "slippage";
 
-interface BrowserWindow extends Window {
-  ethereum?: EIP1193Provider;
-}
-
 interface LastOrder {
   amount: number;
   filled: number;
@@ -36,11 +45,6 @@ interface LastOrder {
   status: string;
   symbol: string;
   type: OrderType;
-}
-
-function getInjectedProvider() {
-  if (typeof window === "undefined") return null;
-  return (window as BrowserWindow).ethereum ?? null;
 }
 
 function errorMessage(error: unknown) {
@@ -178,6 +182,10 @@ export default function Terminal() {
   const [connected, setConnected] = useState(false);
   const [walletAddress, setWalletAddress] = useState<Address | null>(null);
   const [walletClient, setWalletClient] = useState<WalletClient | null>(null);
+  const [walletChainId, setWalletChainId] = useState<number | null>(null);
+  const [walletProviders, setWalletProviders] = useState<WalletProvider[]>([]);
+  const [walletProviderId, setWalletProviderId] = useState<string | null>(null);
+  const [walletPickerOpen, setWalletPickerOpen] = useState(false);
   const [walletBusy, setWalletBusy] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome>("YES");
@@ -244,50 +252,155 @@ export default function Terminal() {
     };
   }, [selected]);
 
-  const connectWallet = useCallback(async () => {
-    if (walletAddress) {
-      getExchange().setSigner({});
-      setWalletAddress(null);
-      setWalletClient(null);
-      setWalletError(null);
-      setOrderNotice(null);
-      return;
-    }
-    const provider = getInjectedProvider();
-    if (!provider) {
-      setWalletError("No browser wallet detected. Install a wallet extension to trade.");
-      return;
-    }
+  const activeWalletProvider = useMemo(
+    () => walletProviders.find((entry) => entry.id === walletProviderId) ?? null,
+    [walletProviderId, walletProviders]
+  );
+  const wrongNetwork = walletAddress != null && walletChainId != null && walletChainId !== SHANNON_CHAIN_ID;
+
+  const applyConnection = useCallback((connection: WalletConnection) => {
+    getExchange().setSigner({ walletClient: connection.walletClient });
+    setWalletProviderId(connection.providerId);
+    setWalletAddress(connection.address);
+    setWalletClient(connection.walletClient);
+    setWalletChainId(connection.chainId);
+    setWalletError(null);
+  }, []);
+
+  const clearConnection = useCallback(() => {
+    getExchange().setSigner({});
+    setWalletAddress(null);
+    setWalletClient(null);
+    setWalletChainId(null);
+    setOrderNotice(null);
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const kick = setTimeout(() => {
+      void discoverWalletProviders().then((found) => {
+        if (alive) setWalletProviders(found);
+      });
+    }, 0);
+    return () => {
+      alive = false;
+      clearTimeout(kick);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!walletProviders.length) return;
+    let alive = true;
+    const kick = setTimeout(() => {
+      void (async () => {
+        const remembered = rememberedWalletProvider();
+        const preferred = remembered ? walletProviders.filter((entry) => entry.id === remembered) : [];
+        for (const candidate of [...preferred, ...walletProviders]) {
+          const restored = await restoreWalletProvider(candidate);
+          if (!alive) return;
+          if (restored) {
+            applyConnection(restored);
+            return;
+          }
+        }
+      })();
+    }, 0);
+    return () => {
+      alive = false;
+      clearTimeout(kick);
+    };
+  }, [applyConnection, walletProviders]);
+
+  useEffect(() => {
+    if (!activeWalletProvider) return;
+    const provider = activeWalletProvider.provider;
+    return subscribeWalletEvents(provider, {
+      onAccountsChanged: (accounts) => {
+        const next = accounts[0];
+        if (!next) {
+          clearConnection();
+          return;
+        }
+        const nextClient = walletClientFor(provider, next);
+        getExchange().setSigner({ walletClient: nextClient });
+        setWalletAddress(next);
+        setWalletClient(nextClient);
+        setWalletError(null);
+      },
+      onChainChanged: (chainId) => setWalletChainId(chainId),
+    });
+  }, [activeWalletProvider, clearConnection]);
+
+  const connectTo = useCallback(async (target: WalletProvider) => {
+    setWalletPickerOpen(false);
     setWalletBusy(true);
     setWalletError(null);
     try {
-      const accounts = (await provider.request({ method: "eth_requestAccounts" })) as Address[];
-      const account = accounts[0];
-      if (!account) throw new Error("No wallet account was returned.");
-      const nextWallet = createWalletClient({
-        account,
-        chain: somniaShannon,
-        transport: custom(provider),
-      });
-      const chainId = await nextWallet.getChainId();
-      if (chainId !== somniaShannon.id) throw new Error("Switch your wallet to Somnia Shannon before trading.");
-      getExchange().setSigner({ walletClient: nextWallet });
-      setWalletClient(nextWallet);
-      setWalletAddress(account);
+      const connection = await connectWalletProvider(target);
+      rememberWalletProvider(target.id);
+      applyConnection(connection);
     } catch (error) {
       setWalletError(errorMessage(error));
-      setWalletClient(null);
-      setWalletAddress(null);
     } finally {
       setWalletBusy(false);
     }
-  }, [walletAddress]);
+  }, [applyConnection]);
+
+  const connectWallet = useCallback(async () => {
+    if (walletAddress) {
+      forgetWalletProvider();
+      setWalletProviderId(null);
+      setWalletError(null);
+      setWalletPickerOpen(false);
+      clearConnection();
+      return;
+    }
+    if (walletPickerOpen) {
+      setWalletPickerOpen(false);
+      return;
+    }
+    let found = walletProviders;
+    if (!found.length) {
+      found = await discoverWalletProviders();
+      setWalletProviders(found);
+    }
+    if (!found.length) {
+      setWalletError("No browser wallet detected. Install a wallet extension to trade.");
+      return;
+    }
+    if (found.length === 1) {
+      await connectTo(found[0]);
+      return;
+    }
+    const remembered = rememberedWalletProvider();
+    const preferred = remembered ? found.find((entry) => entry.id === remembered) : undefined;
+    if (preferred) {
+      await connectTo(preferred);
+      return;
+    }
+    setWalletPickerOpen(true);
+  }, [clearConnection, connectTo, walletAddress, walletPickerOpen, walletProviders]);
+
+  const switchNetwork = useCallback(async () => {
+    if (!activeWalletProvider) return;
+    setWalletBusy(true);
+    setWalletError(null);
+    try {
+      const chainId = await ensureShannonChain(activeWalletProvider.provider);
+      setWalletChainId(chainId);
+    } catch (error) {
+      setWalletError(errorMessage(error));
+    } finally {
+      setWalletBusy(false);
+    }
+  }, [activeWalletProvider]);
 
   const formError = useMemo(() => {
     if (!selected) return "Select a live market first.";
     if (selected.status !== "Trading") return "This market is no longer trading.";
     if (selected.executionReady === false) return "This market was discovered on-chain; execution metadata is still indexing.";
     if (selected.executionMode !== "chain-pool" && !selected.yesSymbol) return "This market has no executable outcome symbol yet.";
+    if (wrongNetwork) return `Your wallet is on chain ${walletChainId}. Switch to Somnia Shannon to sign this order.`;
     const amountValue = Number(amount);
     if (!amount.trim() || !Number.isFinite(amountValue) || amountValue <= 0) return "Enter an amount greater than zero.";
     if (orderType === "limit") {
@@ -303,7 +416,7 @@ export default function Terminal() {
     }
     if (!walletAddress || !walletClient) return "Connect a Somnia Shannon wallet to sign this order.";
     return null;
-  }, [amount, orderType, price, selected, slippage, walletAddress, walletClient]);
+  }, [amount, orderType, price, selected, slippage, walletAddress, walletChainId, walletClient, wrongNetwork]);
 
   const amountInvalid = !amount.trim() || !Number.isFinite(Number(amount)) || Number(amount) <= 0;
   const priceInvalid = !price.trim() || !Number.isFinite(Number(price)) || Number(price) <= 0 || Number(price) >= 100;
@@ -316,7 +429,7 @@ export default function Terminal() {
         ? "slippage"
         : null;
   const marketUnavailable = formError?.startsWith("This market") ?? false;
-  const showFormError = Boolean(formError && (orderAttempted || marketUnavailable || (errorField && touchedFields[errorField])));
+  const showFormError = Boolean(formError && (orderAttempted || marketUnavailable || wrongNetwork || (errorField && touchedFields[errorField])));
 
   const submitOrder = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -403,16 +516,54 @@ export default function Terminal() {
             <span className={`h-1.5 w-1.5 rounded-full ${connected ? "bg-buy" : "bg-sell"}`} />
             {connected ? "Live" : "Connecting"}
           </span>
-          <button
-            type="button"
-            onClick={connectWallet}
-            disabled={walletBusy}
-            className="flex min-h-11 items-center gap-1.5 rounded-[var(--radius-control)] border border-line-strong px-2.5 py-1 text-[11px] text-brand ease-terminal transition-colors hover:bg-surface-1 disabled:cursor-wait disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand focus-visible:outline-offset-2 md:min-h-9"
-            aria-label={walletAddress ? `Disconnect wallet ${walletAddress}` : "Connect wallet"}
-          >
-            <Wallet size={14} weight="regular" aria-hidden="true" />
-            {walletBusy ? "Connecting" : walletAddress ? shortAddress(walletAddress) : "Connect wallet"}
-          </button>
+          {wrongNetwork && (
+            <button
+              type="button"
+              onClick={switchNetwork}
+              disabled={walletBusy}
+              className="flex min-h-11 items-center gap-1.5 rounded-[var(--radius-control)] border border-sell/60 bg-sell/10 px-2.5 py-1 text-[11px] text-sell ease-terminal transition-colors hover:bg-sell/20 disabled:cursor-wait disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand focus-visible:outline-offset-2 md:min-h-9"
+            >
+              {walletBusy ? "Switching" : "Switch to Somnia Shannon"}
+            </button>
+          )}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={connectWallet}
+              disabled={walletBusy}
+              aria-expanded={walletPickerOpen}
+              className="flex min-h-11 items-center gap-1.5 rounded-[var(--radius-control)] border border-line-strong px-2.5 py-1 text-[11px] text-brand ease-terminal transition-colors hover:bg-surface-1 disabled:cursor-wait disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand focus-visible:outline-offset-2 md:min-h-9"
+              aria-label={walletAddress ? `Disconnect wallet ${walletAddress}` : "Connect wallet"}
+            >
+              <Wallet size={14} weight="regular" aria-hidden="true" />
+              {walletBusy ? "Connecting" : walletAddress ? shortAddress(walletAddress) : "Connect wallet"}
+            </button>
+            {walletPickerOpen && !walletAddress && (
+              <div
+                role="menu"
+                aria-label="Choose a wallet"
+                className="absolute right-0 z-50 mt-1.5 w-56 rounded-[var(--radius-panel)] border border-line-strong bg-surface-2 p-1 shadow-2xl"
+              >
+                {walletProviders.map((entry) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { void connectTo(entry); }}
+                    className="flex min-h-11 w-full items-center gap-2 rounded-[var(--radius-control)] px-2.5 py-1.5 text-left text-[11px] text-text-1 ease-terminal transition-colors hover:bg-surface-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand focus-visible:outline-offset-[-2px]"
+                  >
+                    {entry.icon ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={entry.icon} alt="" aria-hidden="true" className="h-4 w-4 rounded" />
+                    ) : (
+                      <Wallet size={16} weight="regular" aria-hidden="true" className="text-text-2" />
+                    )}
+                    {entry.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <span className="num hidden md:inline">{new Date(now).toISOString().slice(11, 19)} UTC</span>
         </div>
       </div>
@@ -422,7 +573,7 @@ export default function Terminal() {
           <PriceChart asset={chartAsset} onAssetChange={setChartAsset} />
           <SpotFlowPanel asset={chartAsset} />
         </div>
-        <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_600px] 2xl:grid-cols-[minmax(0,1fr)_660px]">
         <div className="order-2 min-w-0 lg:order-1">
         <Panel title={`Event contracts / ${visible.length} of ${markets.length} live`}>
           <div className="min-w-0 max-w-full overflow-x-auto">
@@ -496,7 +647,7 @@ export default function Terminal() {
         </Panel>
         </div>
 
-        <div className="order-1 flex min-w-0 flex-col gap-3 lg:order-2">
+        <div className="order-1 flex min-w-0 flex-col gap-3 lg:order-2 xl:grid xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start">
           {selected ? (
             <>
               <Panel title="Manual order">
@@ -689,6 +840,12 @@ export default function Terminal() {
                   <p aria-live="polite" className={`text-[11px] ${showFormError ? "text-down" : "text-muted"}`}>
                     {showFormError ? formError : walletAddress ? "Review the order before signing." : "Connect a Somnia Shannon wallet to sign."}
                   </p>
+                  {walletAddress && !wrongNetwork && (
+                    <p className="flex items-center justify-between text-[11px] text-muted">
+                      <span>Signing as</span>
+                      <span className="num text-foreground">{shortAddress(walletAddress)}</span>
+                    </p>
+                  )}
                   {orderNotice && (
                     <p role={orderNotice.kind === "error" ? "alert" : "status"} className={`text-[11px] ${orderNotice.kind === "error" ? "text-down" : "text-up"}`}>
                       {orderNotice.text}
@@ -702,6 +859,15 @@ export default function Terminal() {
                       className="min-h-11 w-full rounded-md bg-foreground px-3 py-2.5 text-xs font-semibold text-background ease-terminal transition-[opacity,transform] hover:opacity-90 active:translate-y-px disabled:cursor-wait disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2"
                     >
                       {walletBusy ? "Connecting" : "Connect wallet"}
+                    </button>
+                  ) : wrongNetwork ? (
+                    <button
+                      type="button"
+                      onClick={switchNetwork}
+                      disabled={walletBusy}
+                      className="min-h-11 w-full rounded-md bg-amber px-3 py-2.5 text-xs font-semibold text-background ease-terminal transition-[opacity,transform] hover:opacity-90 active:translate-y-px disabled:cursor-wait disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2"
+                    >
+                      {walletBusy ? "Switching network" : "Switch to Somnia Shannon"}
                     </button>
                   ) : (
                     <button
@@ -740,40 +906,44 @@ export default function Terminal() {
                   <p className="text-[10px] leading-relaxed text-muted">DreamDEX execution only. External feeds remain read-only.</p>
                 </form>
               </Panel>
-              <Panel title="Selected window">
-                <div className="px-3 pb-2">
-                  <p className="pb-1 text-xs leading-relaxed text-foreground/90">{selected.question}</p>
-                  <div className="flex items-baseline justify-between pt-1">
-                    <span className="num text-2xl font-semibold text-amber">
-                      {book?.mid != null ? fmtProb(book.mid) : "Unavailable"}
-                    </span>
-                    <span className="num text-[10px] text-muted">YES probability</span>
+              <div className="flex min-w-0 flex-col gap-3">
+                <Panel title="Selected window">
+                  <div className="px-3 pb-2">
+                    <p className="pb-1 text-xs leading-relaxed text-foreground/90">{selected.question}</p>
+                    <div className="flex items-baseline justify-between pt-1">
+                      <span className="num text-2xl font-semibold text-amber">
+                        {book?.mid != null ? fmtProb(book.mid) : "Unavailable"}
+                      </span>
+                      <span className="num text-[10px] text-muted">YES probability</span>
+                    </div>
                   </div>
-                </div>
-              </Panel>
-              <Panel title="Order flow pressure">
-                <div className="px-3 pb-3 pt-1">
-                  <PressureRibbon imbalance={book?.imbalance ?? null} />
-                  <div className="flex justify-between pt-1.5 text-[10px]">
-                    <span className="num text-up">buy {Math.round((book?.imbalance ?? 0.5) * 100)}%</span>
-                    <span className="num text-down">sell {Math.round((1 - (book?.imbalance ?? 0.5)) * 100)}%</span>
+                </Panel>
+                <Panel title="Order flow pressure">
+                  <div className="px-3 pb-3 pt-1">
+                    <PressureRibbon imbalance={book?.imbalance ?? null} />
+                    <div className="flex justify-between pt-1.5 text-[10px]">
+                      <span className="num text-up">buy {Math.round((book?.imbalance ?? 0.5) * 100)}%</span>
+                      <span className="num text-down">sell {Math.round((1 - (book?.imbalance ?? 0.5)) * 100)}%</span>
+                    </div>
                   </div>
-                </div>
-              </Panel>
-              <Panel title="YES order book">
-                <div className="pb-2">{book ? <BookLadder book={book} /> : <p className="px-3 py-2 text-xs text-muted" role="status">Waiting for depth</p>}</div>
-              </Panel>
-              <Panel title="Recent prints">
-                <Tape fills={fills} />
-              </Panel>
-              <Panel title="Window stats">
-                <Stats market={selected} book={book} />
-              </Panel>
+                </Panel>
+                <Panel title="YES order book">
+                  <div className="pb-2">{book ? <BookLadder book={book} /> : <p className="px-3 py-2 text-xs text-muted" role="status">Waiting for depth</p>}</div>
+                </Panel>
+                <Panel title="Recent prints">
+                  <Tape fills={fills} />
+                </Panel>
+                <Panel title="Window stats">
+                  <Stats market={selected} book={book} />
+                </Panel>
+              </div>
             </>
           ) : (
-            <Panel title="Selected window">
-              <p className="px-3 pb-3 text-xs text-muted">Select a market to inspect its flow.</p>
-            </Panel>
+            <div className="xl:col-span-2">
+              <Panel title="Selected window">
+                <p className="px-3 pb-3 text-xs text-muted">Select a market to inspect its flow.</p>
+              </Panel>
+            </div>
           )}
           </div>
         </div>

@@ -109,6 +109,8 @@ Run with `npx tsx scripts/<name>.ts`. The two Playwright scripts expect the dev 
 | `scripts/test-engine.ts` | Strategy-engine correctness on synthetic books/fills: momentum opens YES on buy skew, holds without exit conditions, closes at take-profit with correct PnL accounting; fade opens NO against skew and exits on time-stop; no entry without signal. All assertions must pass. |
 | `scripts/verify-lab.ts` | Headless Chrome drives `/lab`: selects a market, starts a dry-run, waits 50 s, and dumps the log panel — proves the sim consumes real live-book updates in the browser, not fixtures. |
 | `scripts/verify-fleet.ts` | Headless Chrome deploys two cats on different windows, starts the fleet, waits 45 s, and dumps header stats and card contents — proves multi-cat concurrent watching and per-cat equity ticking work against live markets. |
+| `scripts/verify-wallet.ts` | Headless Chrome with an injected mock EIP-6963 wallet: connects from a foreign chain (asserts the app requests `wallet_switchEthereumChain` and adds Somnia Shannon on 4902), restores the session after a reload, surfaces and clears the wrong-network prompt on `chainChanged`, drops the session on wallet lock, and connects through a legacy `window.ethereum` provider. |
+| `scripts/verify-fleet-runner.ts` | Headless Chrome proves the fleet runner outlives the route: deploys a cat, navigates to `/board` and back, and asserts the fleet is still Running with its cat intact; that the run state survives a full page reload; that Stop pauses it; and that a stale open paper position seeded into `localStorage` is cleared on reload and reported to the trader. |
 
 ## DreamDEX integration notes
 

@@ -9,8 +9,8 @@ import {
   resolveChainExecutionMarket,
   type ChainMarketExpectation,
 } from "./market-universe/chain-execution";
+import { ensureWalletClientChain, SHANNON_CHAIN_ID } from "./wallet";
 
-const SHANNON_CHAIN_ID = 50312;
 const MARKET_ID_PATTERN = /^0x[0-9a-f]{64}$/i;
 const MAX_SAFE_AMOUNT = Number.MAX_SAFE_INTEGER;
 
@@ -151,10 +151,12 @@ export async function placeManualTrade(
 ): Promise<UnifiedOrder & { price: number }> {
   if (!walletClient.account) throw new InvalidInputError("connect a wallet account before trading");
   if (walletClient.chain && walletClient.chain.id !== SHANNON_CHAIN_ID) {
-    throw new InvalidInputError("wallet must be connected to Somnia Shannon");
+    throw new InvalidInputError("wallet must be configured for Somnia Shannon");
   }
-  if (await walletClient.getChainId() !== SHANNON_CHAIN_ID) {
-    throw new InvalidInputError("wallet must be connected to Somnia Shannon");
+  try {
+    await ensureWalletClientChain(walletClient);
+  } catch (error) {
+    throw new InvalidInputError(error instanceof Error ? error.message : "wallet must be connected to Somnia Shannon");
   }
   const account = typeof walletClient.account === "string" ? walletClient.account : walletClient.account.address;
   const accounts = await walletClient.getAddresses();
