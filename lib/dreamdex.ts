@@ -29,19 +29,30 @@ export function getExchange(): SomniaMarkets {
 }
 
 const REGISTRY_TTL_MS = 30_000;
+const REGISTRY_RELOAD_MS = 300_000;
 
 let registryPromise: Promise<unknown> | null = null;
 let registryLoadedAt = 0;
+let registryReloadedAt = 0;
 
+/**
+ * `loadMarkets(true)` clears the SDK's pool cache and re-reads book params for every
+ * non-finalized market (hundreds of RPC calls). Warm the registry from cache on the hot
+ * path and only pay for a full reload every REGISTRY_RELOAD_MS.
+ */
 async function ensureRegistryLoaded(): Promise<void> {
   if (registryPromise && Date.now() - registryLoadedAt < REGISTRY_TTL_MS) {
     await registryPromise;
     return;
   }
-  registryLoadedAt = Date.now();
-  registryPromise = getClient().loadMarkets(true).catch((error) => {
+  const now = Date.now();
+  const reload = registryReloadedAt === 0 || now - registryReloadedAt >= REGISTRY_RELOAD_MS;
+  registryLoadedAt = now;
+  if (reload) registryReloadedAt = now;
+  registryPromise = getClient().loadMarkets(reload).catch((error) => {
     registryPromise = null;
     registryLoadedAt = 0;
+    registryReloadedAt = 0;
     throw error;
   });
   await registryPromise;
@@ -81,7 +92,8 @@ function parseRow(m: LoadedMarket): LiveMarketRow | null {
 }
 
 async function listSdkMarkets(): Promise<LiveMarketRow[]> {
-  const markets = Object.values(await getClient().loadMarkets(true));
+  await ensureRegistryLoaded();
+  const markets = Object.values(await getClient().loadMarkets(false));
   return markets
     .map(parseRow)
     .filter((r): r is LiveMarketRow => r !== null && r.status === "Trading")

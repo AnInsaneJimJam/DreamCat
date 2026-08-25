@@ -31,6 +31,14 @@ import {
   type MarketCreatedArgs,
   type MarketsResponse,
 } from "./types";
+import {
+  applyRegistry,
+  discoveryRowToLiveRow,
+  fetchLiveMarketRows,
+  resolveRegistry,
+  warmRegistry,
+  type RegistryEntry,
+} from "./discovery";
 
 const INDEXER_URL = process.env.NEXT_PUBLIC_INDEXER_URL ?? "https://dev.smk.somnia.host/v1/graphql";
 const RPC_URL = process.env.SOMNIA_RPC_URL ?? "https://api.infra.testnet.somnia.network";
@@ -835,34 +843,42 @@ export async function getMarketUniverse(): Promise<MarketsResponse> {
 }
 
 async function computeMarketUniverse(): Promise<MarketsResponse> {
-  const [officialResult, chainResult] = await Promise.allSettled([loadOfficialMarkets(), syncChainMarkets()]);
-  const official = officialResult.status === "fulfilled" ? officialResult.value : [];
-  const chain = chainResult.status === "fulfilled"
-    ? chainResult.value
-    : { events: [], headBlock: state.headBlock, nextBlock: state.nextBlock, complete: false, chunks: 0, error: errorText(chainResult.reason) };
-  const receiptObservations = official.length > 0
-    ? await hydrateOfficialObservations(official, chain.events)
-    : [];
-  storeObservations(receiptObservations);
-  const observations = dedupeObservations([...state.observations.values()]);
-  const enrichments = await enrichChainObservations(observations);
-  const markets = mergeMarketRows(official, observations, Date.now(), enrichments);
-  const errors = [
-    officialResult.status === "rejected" ? errorText(officialResult.reason) : null,
-    chain.error,
-  ].filter((value): value is string => Boolean(value));
+  warmRegistry();
+  const now = Date.now();
+  const discovered = await fetchLiveMarketRows(now);
+  const rows = discovered.map(discoveryRowToLiveRow).filter((row) => row.expiry > now);
+  const ids = rows.map((row) => row.id);
+
+  let registry: Map<string, RegistryEntry> | null = null;
+  let registryError: string | null = null;
+  try {
+    registry = await resolveRegistry(ids);
+  } catch (cause) {
+    registryError = errorText(cause);
+  }
+  const registryPending = registry === null;
+
+  const markets = rows
+    .map((row) => (registry ? applyRegistry(row, registry.get(row.id)) : row))
+    .sort((a, b) => b.volumeQuote - a.volumeQuote || a.expiry - b.expiry);
+
+  const registryMatchedCount = markets.filter((market) => market.sdkReady).length;
+  const thirdPartyCount = markets.filter((market) => market.attribution === "third-party").length;
+
   return {
     markets,
     meta: {
-      officialCount: official.length,
-      chainCount: observations.length,
+      officialCount: registryMatchedCount,
+      chainCount: markets.length,
       mergedCount: markets.length,
-      headBlock: chain.headBlock >= 0 ? chain.headBlock : null,
-      nextBlock: chain.nextBlock >= 0 ? chain.nextBlock : null,
-      chainComplete: chain.complete,
-      degraded: errors.length > 0 || officialResult.status === "rejected",
-      error: errors.length ? errors.join("; ") : null,
-      chainExecutionReadyCount: markets.filter((market) => market.source === "chain" && market.executionReady).length,
+      headBlock: null,
+      nextBlock: null,
+      chainComplete: true,
+      degraded: registryError !== null || markets.length === 0,
+      error: registryError ?? (registryPending ? "Symbol registry warming — trading symbols resolve on a later poll." : null),
+      chainExecutionReadyCount: markets.filter((market) => market.executionReady).length,
+      thirdPartyCount,
+      registryMatchedCount,
     },
   };
 }

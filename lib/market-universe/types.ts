@@ -1,6 +1,7 @@
 export type MarketSource = "indexer" | "chain" | "merged";
 export type TrustLevel = "attested" | "verified";
 export type MarketExecutionMode = "sdk-symbol" | "chain-pool";
+export type MarketAttribution = "primary" | "third-party";
 
 export interface MarketOutcome {
   label: string;
@@ -58,6 +59,7 @@ export interface LiveMarketRow {
   book?: MarketBookMetadata;
   source?: MarketSource;
   trust?: TrustLevel;
+  attribution?: MarketAttribution;
   provenance?: readonly MarketProvenance[];
   sdkReady?: boolean;
   marketAddress?: string;
@@ -157,6 +159,9 @@ export interface MarketsResponseMeta {
   degraded: boolean;
   error: string | null;
   chainExecutionReadyCount?: number;
+  thirdPartyCount?: number;
+  registryMatchedCount?: number;
+  indexerLagBlocks?: number | null;
   stale?: boolean;
   ageMs?: number;
 }
