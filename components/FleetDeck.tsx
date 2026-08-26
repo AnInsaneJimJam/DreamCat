@@ -5,6 +5,7 @@ import {
   Check,
   CircleNotch,
   Info,
+  Lightning,
   Play,
   Plus,
   Stop,
@@ -17,15 +18,18 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import AppChrome from "@/components/AppChrome";
 import { listLiveMarkets, type LiveMarketRow } from "@/lib/dreamdex";
+import BurnerPanel from "@/components/BurnerPanel";
 import CatConfigModal from "@/components/CatConfigModal";
 import { TEMPLATES, type StrategyParams } from "@/lib/strategy";
+import { canTradeLive } from "@/lib/live-fleet";
+import type { Address } from "viem";
 import { useNow } from "@/lib/use-now";
 import {
-  ACCENTS,
   MAX_CATS,
   catEquity,
   fleetSummary,
   freshCat,
+  nextAccent,
   totalAlloc,
   type FleetCat,
 } from "@/lib/fleet";
@@ -38,10 +42,12 @@ import {
   removeFleetCat,
   setFleetBankroll,
   setFleetMarkets,
+  setFleetMode,
   setFleetRunning,
   subscribeFleet,
   updateFleetCatConfig,
   updateFleetCats,
+  type FleetMode,
 } from "@/lib/fleet-runner";
 
 const fmtProb = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -129,14 +135,23 @@ function FleetEquityPlot({ cats }: { cats: FleetCat[] }) {
   );
 }
 
-function StateCell({ cat, now }: { cat: FleetCat; now: number }) {
+function StateCell({ cat, now, mode, running }: { cat: FleetCat; now: number; mode: FleetMode; running: boolean }) {
+  if (mode === "live") {
+    if (!canTradeLive(cat.archetype)) return <span className="text-[11px] text-text-3">Paused in live run</span>;
+    if (!running) return <span className="text-[11px] text-text-3">Waiting for deploy</span>;
+    const live = cat.live;
+    if (live?.status === "submitting") return <span className="text-[11px] font-semibold text-brand">Signing order</span>;
+    if (live?.status === "error") {
+      return <span className="truncate text-[11px] text-sell" title={live.lastError}>{live.lastError ?? "Order rejected"}</span>;
+    }
+  }
   const position = cat.sim.position;
   if (position) {
     return (
       <span className="flex items-baseline gap-1.5">
         <span className={`text-[11px] font-semibold ${position.side === "YES" ? "text-buy" : "text-sell"}`}>{position.side}</span>
         <span className="num text-[11px] text-text-2">{fmtProb(position.entryPrice)}</span>
-        <span className="num text-[10px] text-text-3">{Math.max(0, Math.round((now - position.openedAt) / 1000))}s</span>
+        <span className="num text-[10px] text-text-3">{running ? `${Math.max(0, Math.round((now - position.openedAt) / 1000))}s` : "held, paused"}</span>
       </span>
     );
   }
@@ -151,7 +166,7 @@ function StateCell({ cat, now }: { cat: FleetCat; now: number }) {
       </span>
     );
   }
-  return <span className="text-[11px] text-text-3">Scanning</span>;
+  return <span className="text-[11px] text-text-3">{running ? "Scanning" : "Waiting for deploy"}</span>;
 }
 
 interface Draft {
@@ -163,7 +178,7 @@ type MarketStatus = "loading" | "ready" | "error";
 
 export default function FleetDeck() {
   const fleet = useSyncExternalStore(subscribeFleet, getFleetState, getFleetServerState);
-  const { cats, running, bankroll, live: liveData, hydrated: storageReady, droppedPositions } = fleet;
+  const { cats, running, mode, bankroll, live: liveData, hydrated: storageReady, droppedPositions, burnerReady } = fleet;
   const [markets, setMarkets] = useState<LiveMarketRow[]>([]);
   const [marketStatus, setMarketStatus] = useState<MarketStatus>("loading");
   const [marketError, setMarketError] = useState("");
@@ -171,6 +186,7 @@ export default function FleetDeck() {
   const [draft, setDraft] = useState<Draft>({ persona: 0, marketId: "" });
   const [draftError, setDraftError] = useState("");
   const [modal, setModal] = useState<{ mode: "create" } | { mode: "edit"; slot: number } | null>(null);
+  const [modeError, setModeError] = useState("");
   const marketsRef = useRef(markets);
   const refreshingRef = useRef(false);
   const now = useNow();
@@ -262,7 +278,7 @@ export default function FleetDeck() {
     const cat = freshCat({
       slot,
       name: cats.some((item) => item.name === template.cat) ? `${template.cat} II` : template.cat,
-      accent: ACCENTS[slot % ACCENTS.length],
+      accent: nextAccent(cats),
       archetype: template.archetype,
       params,
       marketId: draft.marketId,
@@ -312,6 +328,10 @@ export default function FleetDeck() {
   const allocUsed = totalAlloc(cats);
   const remainingAlloc = Math.max(0, 100 - allocUsed);
   const editingCat = modal?.mode === "edit" ? cats.find((cat) => cat.slot === modal.slot) ?? null : null;
+  const collateral = (markets.find((market) => market.collateral)?.collateral ?? null) as Address | null;
+  const liveBlocked = cats.filter((cat) => !canTradeLive(cat.archetype));
+  const liveRealized = cats.reduce((total, cat) => total + (cat.live?.realizedPnl ?? 0), 0);
+  const headlineEquity = mode === "live" ? liveRealized : summary.equity;
 
   return (
     <div className="min-h-dvh min-w-0 overflow-x-clip bg-canvas pb-24 text-text-1 md:pb-0">
@@ -332,6 +352,27 @@ export default function FleetDeck() {
           <Link href="/leaderboard" className="flex min-h-11 items-center rounded-[var(--radius-control)] border border-line-strong bg-surface-1 px-3.5 text-xs font-semibold text-text-1 transition-colors duration-150 hover:border-brand/60 hover:text-brand">
             Open board
           </Link>
+          <div role="group" aria-label="Execution mode" className="flex items-center rounded-[var(--radius-control)] border border-line-strong bg-surface-1 p-0.5">
+            {(["dry", "live"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={mode === option}
+                disabled={option === "live" && !burnerReady}
+                title={option === "live" && !burnerReady ? "Create and fund the cat wallet first" : undefined}
+                onClick={() => setModeError(setFleetMode(option) ?? "")}
+                className={`min-h-10 cursor-pointer rounded-[calc(var(--radius-control)-2px)] px-3 text-xs font-semibold transition-colors duration-150 ${
+                  mode === option
+                    ? option === "live"
+                      ? "bg-sell/[0.18] text-sell"
+                      : "bg-surface-3 text-text-1"
+                    : "text-text-3 hover:text-text-1"
+                } disabled:cursor-not-allowed disabled:opacity-40`}
+              >
+                {option === "dry" ? "Dry run" : "Live run"}
+              </button>
+            ))}
+          </div>
           <button type="button" aria-pressed={running} disabled={!cats.length} onClick={() => setFleetRunning(!running)} className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] px-3.5 text-xs font-semibold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40 ${running ? "bg-sell/[0.14] text-sell hover:bg-sell/[0.22]" : "bg-brand text-brand-ink hover:bg-brand-strong"}`}>
             {running ? <Stop aria-hidden="true" size={14} weight="fill" /> : <Play aria-hidden="true" size={14} weight="fill" />}
             {running ? "Stop fleet" : "Deploy fleet"}
@@ -352,16 +393,38 @@ export default function FleetDeck() {
           </div>
         ) : null}
 
+        {modeError ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius-panel)] border border-sell/40 bg-sell/[0.06] px-3 py-2 text-xs text-text-2" role="alert">
+            <WarningCircle aria-hidden="true" className="shrink-0 text-sell" size={15} weight="fill" />
+            <span>{modeError}</span>
+            <button type="button" onClick={() => setModeError("")} className="ml-auto min-h-11 cursor-pointer rounded-[var(--radius-control)] px-2 text-xs font-semibold text-sell hover:bg-sell/[0.12] md:min-h-9">
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
+        {mode === "live" ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius-panel)] border border-sell/40 bg-sell/[0.06] px-3 py-2 text-xs text-text-2" role="status">
+            <Lightning aria-hidden="true" className="shrink-0 text-sell" size={15} weight="fill" />
+            <span>
+              Live run signs real Somnia Shannon transactions from the cat wallet and spends real testnet funds.
+              {liveBlocked.length > 0
+                ? ` ${liveBlocked.map((cat) => cat.name).join(", ")} ${liveBlocked.length === 1 ? "rests quotes and stays paused" : "rest quotes and stay paused"} in live run.`
+                : ""}
+            </span>
+          </div>
+        ) : null}
+
         <div className="grid min-w-0 items-stretch gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
           <section aria-labelledby="fleet-equity-heading" className="surface-shell min-w-0">
             <div className="surface-frame flex h-full min-w-0 flex-col p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-[10px] uppercase tracking-[0.18em] text-text-3">Fleet equity</p>
-                  <p className={`num mt-1 text-4xl font-semibold leading-none tracking-[-0.02em] sm:text-5xl ${summary.equity >= 0 ? "text-buy" : "text-sell"}`}>
-                    {summary.equity >= 0 ? "+" : ""}{summary.equity.toFixed(2)}
+                  <p className="text-[10px] uppercase tracking-[0.18em] text-text-3">{mode === "live" ? "Realized on chain" : "Fleet equity"}</p>
+                  <p className={`num mt-1 text-4xl font-semibold leading-none tracking-[-0.02em] sm:text-5xl ${headlineEquity >= 0 ? "text-buy" : "text-sell"}`}>
+                    {headlineEquity >= 0 ? "+" : ""}{headlineEquity.toFixed(2)}
                   </p>
-                  <p className="num mt-1.5 text-[11px] text-text-3">tUSDC marked against live books</p>
+                  <p className="num mt-1.5 text-[11px] text-text-3">{mode === "live" ? "tUSDC settled from confirmed fills" : "tUSDC marked against live books"}</p>
                 </div>
                 <dl className="flex shrink-0 items-start gap-5 text-right">
                   <div>
@@ -400,6 +463,10 @@ export default function FleetDeck() {
                   ))}
                 </div>
                 <p className="num mt-2 text-[11px] text-text-3">{allocUsed}% allocated / {remainingAlloc}% free</p>
+              </div>
+
+              <div className="min-w-0 border-t border-line pt-3">
+                <BurnerPanel collateral={collateral} />
               </div>
 
               <div className="min-w-0 border-t border-line pt-3">
@@ -478,7 +545,7 @@ export default function FleetDeck() {
                       </p>
 
                       <div className="col-span-2 col-start-2 min-w-0 lg:col-span-1 lg:col-start-auto">
-                        <StateCell cat={cat} now={now} />
+                        <StateCell cat={cat} mode={mode} now={now} running={running} />
                       </div>
 
                       <div className="col-span-2 col-start-2 min-w-0 lg:col-span-1 lg:col-start-auto">
@@ -487,7 +554,11 @@ export default function FleetDeck() {
 
                       <div className="col-span-2 col-start-2 flex items-baseline gap-2 lg:col-span-1 lg:col-start-auto lg:flex-col lg:items-end lg:gap-0.5">
                         <span className={`num text-sm font-semibold ${equity >= 0 ? "text-buy" : "text-sell"}`}>{equity >= 0 ? "+" : ""}{equity.toFixed(2)}</span>
-                        <span className="num text-[10px] text-text-3">{cat.sim.trades}t / {cat.sim.wins}W / {cat.allocPct}%</span>
+                        <span className="num text-[10px] text-text-3">
+                          {mode === "live"
+                            ? `${cat.live?.orders ?? 0} orders / ${cat.allocPct}%`
+                            : `${cat.sim.trades}t / ${cat.sim.wins}W / ${cat.allocPct}%`}
+                        </span>
                       </div>
 
                       <div className="col-start-3 row-start-1 flex shrink-0 items-center justify-end gap-0.5 lg:col-start-auto lg:row-start-auto">
@@ -521,7 +592,7 @@ export default function FleetDeck() {
           catName={cats.some((item) => item.name === draftTemplate.cat) ? `${draftTemplate.cat} II` : draftTemplate.cat}
           archetype={draftTemplate.archetype}
           blurb={draftTemplate.blurb}
-          accent={ACCENTS[(cats.reduce((max, cat) => Math.max(max, cat.slot), -1) + 1) % ACCENTS.length]}
+          accent={nextAccent(cats)}
           marketLabel={marketLabel(markets.find((market) => market.id === draft.marketId))}
           initialParams={draftTemplate.defaults}
           initialAllocPct={Math.min(20, remainingAlloc)}

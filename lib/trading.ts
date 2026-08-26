@@ -9,6 +9,7 @@ import {
   resolveChainExecutionMarket,
   type ChainMarketExpectation,
 } from "./market-universe/chain-execution";
+import { serializeOrder } from "./order-queue";
 import { ensureWalletClientChain, SHANNON_CHAIN_ID } from "./wallet";
 
 const MARKET_ID_PATTERN = /^0x[0-9a-f]{64}$/i;
@@ -193,16 +194,18 @@ export async function placeManualTrade(
       throw officialError;
     }
   }
-  const exchange = getExchange();
-  exchange.setSigner({ walletClient });
-  const order = await exchange.createOrder(
-    executable.symbol,
-    trade.type,
-    trade.side,
-    trade.amount,
-    trade.price,
-    { slippage: trade.slippage },
-  );
+  const order = await serializeOrder(async () => {
+    const exchange = getExchange();
+    exchange.setSigner({ walletClient });
+    return exchange.createOrder(
+      executable.symbol,
+      trade.type,
+      trade.side,
+      trade.amount,
+      trade.price,
+      { slippage: trade.slippage },
+    );
+  });
   if (order.price === undefined) throw new InvalidInputError("order price was not returned by the exchange");
   return { ...order, price: order.price };
 }

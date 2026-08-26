@@ -11,6 +11,7 @@ import {
 } from "../lib/strategy";
 import { resolveFillSide, type BookSnapshot, type Fill, type LiveMarketRow } from "../lib/dreamdex";
 import { intervalSpanMs, strikeUsd, windowStartFor } from "../lib/market-context";
+import { ACCENTS, dedupeAccents, nextAccent, type FleetCat } from "../lib/fleet";
 
 let failures = 0;
 function assert(condition: boolean, label: string): void {
@@ -160,6 +161,23 @@ const expiryAt = Date.UTC(2026, 7, 26, 11, 0, 0);
 assert(windowStartFor(asRow({ kind: "open", interval: "15m", expiry: expiryAt })) === expiryAt - 900000, "windowStartFor derives the start from expiry and interval");
 assert(windowStartFor(asRow({ kind: "open", interval: "15m", expiry: expiryAt, tradingStart: 1787741100 })) === 1787741100000, "windowStartFor prefers tradingStart and normalises seconds");
 assert(windowStartFor(asRow({ kind: "open", interval: "weekly", expiry: expiryAt })) === null, "windowStartFor gives up on an unparseable interval");
+
+const asCat = (slot: number, accent: string) => ({ slot, accent, name: `c${slot}` }) as FleetCat;
+
+assert(nextAccent([]) === ACCENTS[0], "the first cat takes the first accent");
+assert(nextAccent([asCat(0, ACCENTS[0])]) === ACCENTS[1], "the next cat takes the next free accent");
+assert(
+  nextAccent([asCat(0, ACCENTS[0]), asCat(1, ACCENTS[2])]) === ACCENTS[1],
+  "a gap left by a removed cat is reused before later colours"
+);
+
+const collided = dedupeAccents([asCat(0, ACCENTS[0]), asCat(5, ACCENTS[0]), asCat(6, "#f2b84b")]);
+assert(new Set(collided.map((cat) => cat.accent)).size === 3, "duplicate and unknown accents are separated");
+assert(collided.every((cat) => ACCENTS.includes(cat.accent)), "repaired accents come from the palette");
+assert(collided[0].accent === ACCENTS[0], "the first holder of a colour keeps it");
+
+const full = ACCENTS.map((accent, index) => asCat(index, accent));
+assert(new Set(dedupeAccents(full).map((cat) => cat.accent)).size === ACCENTS.length, "a full distinct fleet is left alone");
 
 if (failures > 0) {
   console.error(`engine self-check: ${failures} assertion${failures === 1 ? "" : "s"} failed`);

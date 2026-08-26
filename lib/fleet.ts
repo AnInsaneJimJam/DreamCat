@@ -1,4 +1,5 @@
 import type { BookSnapshot, Fill } from "./dreamdex";
+import type { LiveCatState } from "./live-fleet";
 import {
   equityCurve,
   initialSimState,
@@ -22,6 +23,7 @@ export interface FleetCatInput {
 export interface FleetCat extends FleetCatInput {
   sim: SimState;
   equityHist: number[];
+  live?: LiveCatState;
 }
 
 export interface FleetSlotData {
@@ -33,6 +35,26 @@ export interface FleetSlotData {
 export const MAX_CATS = 5;
 
 export const ACCENTS = ["#f59e0b", "#22d3ee", "#f472b6", "#34d399", "#a78bfa"];
+
+export function nextAccent(cats: FleetCat[]): string {
+  const taken = new Set(cats.map((cat) => cat.accent));
+  return ACCENTS.find((accent) => !taken.has(accent)) ?? ACCENTS[cats.length % ACCENTS.length];
+}
+
+export function dedupeAccents(cats: FleetCat[]): FleetCat[] {
+  const seen = new Set<string>();
+  return cats.map((cat) => {
+    const known = ACCENTS.includes(cat.accent);
+    if (known && !seen.has(cat.accent)) {
+      seen.add(cat.accent);
+      return cat;
+    }
+    const free = ACCENTS.find((accent) => !seen.has(accent));
+    if (!free) return cat;
+    seen.add(free);
+    return { ...cat, accent: free };
+  });
+}
 
 export function totalAlloc(cats: FleetCat[]): number {
   return cats.reduce((s, c) => s + c.allocPct, 0);
