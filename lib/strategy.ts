@@ -484,6 +484,21 @@ export function stepSim(
   return state;
 }
 
+export function flattenForReconfigure(state: SimState, book: BookSnapshot | null, now: number): SimState {
+  const pos = state.position;
+  if (!pos) return state.quotes ? { ...state, quotes: EMPTY_QUOTES } : state;
+  const bestBid = book?.bids[0]?.price;
+  const bestAsk = book?.asks[0]?.price;
+  if (bestBid != null && bestAsk != null) {
+    const mark = pos.side === "YES" ? bestBid : 1 - bestAsk;
+    return { ...closePosition(state, pos, mark, now, ["reconfigured"], `${pos.side} ${pos.size}`), quotes: EMPTY_QUOTES };
+  }
+  return appendLog(
+    { ...state, position: null, quotes: EMPTY_QUOTES },
+    { ts: now, action: "close", detail: `${pos.side} ${pos.size} cleared · reconfigured with no live book to mark against` }
+  );
+}
+
 export function equityCurve(state: SimState, book: BookSnapshot): number {
   let eq = state.realizedPnl;
   if (state.position && book.bids[0] && book.asks[0]) {

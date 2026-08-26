@@ -22,16 +22,9 @@ import {
   type Fill,
   type LiveMarketRow,
 } from "@/lib/dreamdex";
+import StrategyParamFields from "@/components/StrategyParamFields";
 import { acquireAsset, buildMarketContext } from "@/lib/market-context";
 import {
-  DEFAULT_EDGE_THRESHOLD,
-  DEFAULT_FLATTEN_SEC,
-  DEFAULT_MAX_ENTRY_PRICE,
-  DEFAULT_MAX_QUOTE_AGE_SEC,
-  DEFAULT_QUOTE_SPREAD,
-  DEFAULT_SETTLE_SIGMAS,
-  DEFAULT_TAPE_WINDOW_SEC,
-  DEFAULT_TAU_GATE_SEC,
   equityCurve,
   initialSimState,
   stepSim,
@@ -53,49 +46,6 @@ function Panel({ children, className = "" }: { children: ReactNode; className?: 
   return (
     <div className={`surface-shell min-w-0 ${className}`}>
       <div className="surface-frame min-w-0 p-3">{children}</div>
-    </div>
-  );
-}
-
-function Slider({
-  id,
-  label,
-  value,
-  min,
-  max,
-  step,
-  format,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  format: (v: number) => string;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <div>
-      <div className="flex items-center justify-between gap-3 pb-2">
-        <label htmlFor={id} className="text-xs text-text-2">
-          {label}
-        </label>
-        <output htmlFor={id} className="num text-xs font-medium text-text-1">
-          {format(value)}
-        </output>
-      </div>
-      <input
-        id={id}
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="min-h-11 w-full cursor-pointer accent-brand"
-      />
     </div>
   );
 }
@@ -211,15 +161,12 @@ export default function StrategyLab() {
   return (
     <div className="min-h-dvh min-w-0 overflow-x-clip bg-canvas pb-24 text-text-1 md:pb-0">
       <AppChrome current="lab" />
-      <header className="mx-auto flex max-w-[1440px] flex-col gap-5 px-4 pb-5 pt-7 sm:px-6 lg:flex-row lg:items-end lg:justify-between lg:px-8 lg:pt-9">
+      <header className="mx-auto flex max-w-[1440px] flex-col gap-3 px-4 pb-3 pt-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
         <div className="min-w-0">
           <p className="section-kicker">Strategy Lab / Simulate</p>
-          <h1 className="mt-3 max-w-3xl font-display text-4xl font-semibold leading-tight tracking-[-0.045em] sm:text-5xl">
+          <h1 className="mt-1.5 max-w-3xl font-display text-2xl font-semibold leading-tight tracking-[-0.03em] sm:text-3xl">
             Shape a strategy against the live book.
           </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-text-2 sm:text-base">
-            Tune a paper strategy, watch its signals, and inspect every simulated fill before you send a fleet.
-          </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <div className="flex items-center gap-2 rounded-[var(--radius-control)] border border-line px-3 py-2 text-xs text-text-2">
@@ -236,13 +183,13 @@ export default function StrategyLab() {
       </header>
 
       <main className="mx-auto grid w-full max-w-[1440px] min-w-0 items-start gap-3 px-4 pb-8 sm:px-6 lg:px-8 xl:grid-cols-[300px_minmax(0,1fr)_minmax(280px,0.9fr)]">
-        <section aria-labelledby="strategy-controls-heading" className="flex min-w-0 flex-col gap-3">
+        <section aria-labelledby="strategy-controls-heading" className="flex min-w-0 flex-col gap-3 xl:sticky xl:top-3 xl:max-h-[calc(100dvh-1.5rem)] xl:overflow-y-auto xl:pr-1">
           <Panel>
             <div className="flex items-center gap-2 border-b border-line pb-3">
               <Flask aria-hidden="true" className="text-brand" size={17} weight="regular" />
               <h2 id="strategy-controls-heading" className="text-sm font-semibold">Choose a strategy</h2>
             </div>
-            <div className="space-y-2 pt-3">
+            <div className="grid grid-cols-2 gap-2 pt-3">
               {TEMPLATES.map((candidate) => {
                 const active = archetype === candidate.archetype;
                 return (
@@ -254,19 +201,17 @@ export default function StrategyLab() {
                       setArchetype(candidate.archetype);
                       setParams(candidate.defaults);
                     }}
-                    className={`min-h-11 w-full cursor-pointer rounded-[var(--radius-control)] border p-3 text-left transition-colors duration-150 ${
+                    className={`flex min-h-11 cursor-pointer flex-col justify-center rounded-[var(--radius-control)] border px-2.5 py-2 text-left transition-colors duration-150 ${
                       active ? "border-brand/60 bg-brand/[0.08]" : "border-line hover:border-line-strong hover:bg-surface-3"
                     }`}
                   >
-                    <span className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-semibold text-text-1">{candidate.cat}</span>
-                      <span className="num text-[10px] uppercase tracking-[0.16em] text-text-3">{candidate.archetype}</span>
-                    </span>
-                    <span className="mt-1 block text-xs leading-5 text-text-2">{candidate.blurb}</span>
+                    <span className={`truncate text-sm font-semibold ${active ? "text-brand" : "text-text-1"}`}>{candidate.cat}</span>
+                    <span className="num truncate text-[10px] uppercase tracking-[0.14em] text-text-3">{candidate.archetype}</span>
                   </button>
                 );
               })}
             </div>
+            <p className="mt-3 border-t border-line pt-3 text-xs leading-5 text-text-2">{template.blurb}</p>
           </Panel>
 
           <Panel>
@@ -274,33 +219,8 @@ export default function StrategyLab() {
               <SlidersHorizontal aria-hidden="true" className="text-brand" size={17} weight="regular" />
               <h2 className="text-sm font-semibold">Parameters</h2>
             </div>
-            <div className="space-y-4 pt-4">
-              <Slider id="entry-signal" label="Entry signal" value={params.entryEdge} min={0.5} max={0.95} step={0.05} format={(value) => value.toFixed(2)} onChange={(value) => setParams((current) => ({ ...current, entryEdge: value }))} />
-              <Slider id="order-size" label="Order size" value={params.orderSize} min={1} max={50} step={1} format={(value) => `${value} ctr`} onChange={(value) => setParams((current) => ({ ...current, orderSize: value }))} />
-              <Slider id="take-profit" label="Take profit" value={params.takeProfit} min={0.01} max={0.15} step={0.005} format={(value) => `${(value * 100).toFixed(1)}%`} onChange={(value) => setParams((current) => ({ ...current, takeProfit: value }))} />
-              <Slider id="stop-loss" label="Stop loss" value={params.stopLoss} min={0.01} max={0.1} step={0.005} format={(value) => `${(value * 100).toFixed(1)}%`} onChange={(value) => setParams((current) => ({ ...current, stopLoss: value }))} />
-              <Slider id="tape-lookback" label="Tape lookback" value={params.lookback} min={3} max={20} step={1} format={(value) => `${value} prints`} onChange={(value) => setParams((current) => ({ ...current, lookback: value }))} />
-              {archetype === "momentum" || archetype === "fade" ? (
-                <Slider id="tape-window" label="Tape recency" value={params.tapeWindowSec ?? DEFAULT_TAPE_WINDOW_SEC} min={60} max={3600} step={60} format={(value) => `last ${Math.round(value / 60)}m`} onChange={(value) => setParams((current) => ({ ...current, tapeWindowSec: value }))} />
-              ) : null}
-              <Slider id="time-stop" label="Time stop" value={params.maxHoldSec} min={30} max={900} step={30} format={(value) => `${value}s`} onChange={(value) => setParams((current) => ({ ...current, maxHoldSec: value }))} />
-              {archetype === "fairvalue" ? (
-                <Slider id="model-edge" label="Model edge" value={params.edgeThreshold ?? DEFAULT_EDGE_THRESHOLD} min={0.02} max={0.2} step={0.005} format={(value) => `${(value * 100).toFixed(1)}%`} onChange={(value) => setParams((current) => ({ ...current, edgeThreshold: value }))} />
-              ) : null}
-              {archetype === "theta" ? (
-                <>
-                  <Slider id="settle-sigmas" label="Settled distance" value={params.settleSigmas ?? DEFAULT_SETTLE_SIGMAS} min={0.5} max={4} step={0.1} format={(value) => `${value.toFixed(1)}σ`} onChange={(value) => setParams((current) => ({ ...current, settleSigmas: value }))} />
-                  <Slider id="max-entry" label="Max entry price" value={params.maxEntryPrice ?? DEFAULT_MAX_ENTRY_PRICE} min={0.6} max={0.98} step={0.01} format={(value) => `${(value * 100).toFixed(0)}%`} onChange={(value) => setParams((current) => ({ ...current, maxEntryPrice: value }))} />
-                  <Slider id="tau-gate" label="Entry window" value={params.tauGateSec ?? DEFAULT_TAU_GATE_SEC} min={60} max={1800} step={60} format={(value) => `last ${Math.round(value / 60)}m`} onChange={(value) => setParams((current) => ({ ...current, tauGateSec: value }))} />
-                </>
-              ) : null}
-              {archetype === "marketmaker" ? (
-                <>
-                  <Slider id="quote-spread" label="Quote half-width" value={params.quoteSpread ?? DEFAULT_QUOTE_SPREAD} min={0.005} max={0.08} step={0.005} format={(value) => `${(value * 100).toFixed(1)}%`} onChange={(value) => setParams((current) => ({ ...current, quoteSpread: value }))} />
-                  <Slider id="quote-age" label="Quote lifetime" value={params.maxQuoteAgeSec ?? DEFAULT_MAX_QUOTE_AGE_SEC} min={15} max={600} step={15} format={(value) => `${value}s`} onChange={(value) => setParams((current) => ({ ...current, maxQuoteAgeSec: value }))} />
-                  <Slider id="flatten-sec" label="Flatten before expiry" value={params.flattenSec ?? DEFAULT_FLATTEN_SEC} min={15} max={300} step={15} format={(value) => `${value}s`} onChange={(value) => setParams((current) => ({ ...current, flattenSec: value }))} />
-                </>
-              ) : null}
+            <div className="space-y-3 pt-3">
+              <StrategyParamFields archetype={archetype} params={params} onChange={setParams} />
             </div>
           </Panel>
         </section>

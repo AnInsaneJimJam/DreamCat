@@ -3,7 +3,7 @@
 import { watchBook, watchFills, type BookSnapshot, type Fill, type LiveMarketRow } from "./dreamdex";
 import { tickFleet, type FleetCat, type FleetSlotData } from "./fleet";
 import { acquireAsset, buildMarketContext } from "./market-context";
-import { TEMPLATES, type Archetype, type MarketContext } from "./strategy";
+import { TEMPLATES, flattenForReconfigure, type Archetype, type MarketContext, type StrategyParams } from "./strategy";
 
 const STORAGE_KEY = "dreamcat-fleet-v1";
 const KNOWN_ARCHETYPES = new Set<Archetype>(TEMPLATES.map((template) => template.archetype));
@@ -250,6 +250,22 @@ export function updateFleetCats(updater: (cats: FleetCat[]) => FleetCat[]): void
   const cats = updater(state.cats);
   if (cats === state.cats) return;
   commit({ cats, running: cats.length === 0 ? false : state.running });
+  persist(true);
+  syncRun();
+}
+
+export function updateFleetCatConfig(slot: number, params: StrategyParams, allocPct: number): void {
+  const target = state.cats.find((cat) => cat.slot === slot);
+  if (!target) return;
+  const data = state.running ? slotDataFor(state.cats) : null;
+  const now = Date.now();
+  const cats = state.cats.map((cat) => {
+    if (cat.slot !== slot) return cat;
+    const next = { ...cat, params, allocPct };
+    if (!state.running) return next;
+    return { ...next, sim: flattenForReconfigure(cat.sim, data?.get(slot)?.book ?? null, now) };
+  });
+  commit({ cats });
   persist(true);
   syncRun();
 }
