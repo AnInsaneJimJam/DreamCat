@@ -22,7 +22,16 @@ import {
   type Fill,
   type LiveMarketRow,
 } from "@/lib/dreamdex";
+import { acquireAsset, buildMarketContext } from "@/lib/market-context";
 import {
+  DEFAULT_EDGE_THRESHOLD,
+  DEFAULT_FLATTEN_SEC,
+  DEFAULT_MAX_ENTRY_PRICE,
+  DEFAULT_MAX_QUOTE_AGE_SEC,
+  DEFAULT_QUOTE_SPREAD,
+  DEFAULT_SETTLE_SIGMAS,
+  DEFAULT_TAPE_WINDOW_SEC,
+  DEFAULT_TAU_GATE_SEC,
   equityCurve,
   initialSimState,
   stepSim,
@@ -106,6 +115,7 @@ export default function StrategyLab() {
   const bookRef = useRef<BookSnapshot | null>(null);
   const fillsRef = useRef<Fill[]>([]);
   const marketsRef = useRef(markets);
+  const selectedRef = useRef<LiveMarketRow | null>(null);
   const refreshingRef = useRef(false);
   const now = useNow();
 
@@ -146,6 +156,15 @@ export default function StrategyLab() {
   const selected = markets.find((market) => market.id === selectedId) ?? null;
 
   useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+
+  useEffect(() => {
+    if (!selected?.asset || !running) return;
+    return acquireAsset(selected.asset);
+  }, [selected?.asset, running]);
+
+  useEffect(() => {
     if (!selected || !running) return;
     const stopBook = watchBook(selected.yesSymbol, (nextBook) => {
       if (nextBook.bids.length || nextBook.asks.length) {
@@ -166,7 +185,9 @@ export default function StrategyLab() {
     if (!running) return;
     const timer = setInterval(() => {
       if (bookRef.current) {
-        setSim((state) => stepSim({ archetype, params }, state, bookRef.current!, fillsRef.current, Date.now()));
+        const row = selectedRef.current;
+        const ctx = row ? buildMarketContext(row) : undefined;
+        setSim((state) => stepSim({ archetype, params }, state, bookRef.current!, fillsRef.current, Date.now(), ctx));
       }
     }, 1000);
     return () => clearInterval(timer);
@@ -259,7 +280,27 @@ export default function StrategyLab() {
               <Slider id="take-profit" label="Take profit" value={params.takeProfit} min={0.01} max={0.15} step={0.005} format={(value) => `${(value * 100).toFixed(1)}%`} onChange={(value) => setParams((current) => ({ ...current, takeProfit: value }))} />
               <Slider id="stop-loss" label="Stop loss" value={params.stopLoss} min={0.01} max={0.1} step={0.005} format={(value) => `${(value * 100).toFixed(1)}%`} onChange={(value) => setParams((current) => ({ ...current, stopLoss: value }))} />
               <Slider id="tape-lookback" label="Tape lookback" value={params.lookback} min={3} max={20} step={1} format={(value) => `${value} prints`} onChange={(value) => setParams((current) => ({ ...current, lookback: value }))} />
+              {archetype === "momentum" || archetype === "fade" ? (
+                <Slider id="tape-window" label="Tape recency" value={params.tapeWindowSec ?? DEFAULT_TAPE_WINDOW_SEC} min={60} max={3600} step={60} format={(value) => `last ${Math.round(value / 60)}m`} onChange={(value) => setParams((current) => ({ ...current, tapeWindowSec: value }))} />
+              ) : null}
               <Slider id="time-stop" label="Time stop" value={params.maxHoldSec} min={30} max={900} step={30} format={(value) => `${value}s`} onChange={(value) => setParams((current) => ({ ...current, maxHoldSec: value }))} />
+              {archetype === "fairvalue" ? (
+                <Slider id="model-edge" label="Model edge" value={params.edgeThreshold ?? DEFAULT_EDGE_THRESHOLD} min={0.02} max={0.2} step={0.005} format={(value) => `${(value * 100).toFixed(1)}%`} onChange={(value) => setParams((current) => ({ ...current, edgeThreshold: value }))} />
+              ) : null}
+              {archetype === "theta" ? (
+                <>
+                  <Slider id="settle-sigmas" label="Settled distance" value={params.settleSigmas ?? DEFAULT_SETTLE_SIGMAS} min={0.5} max={4} step={0.1} format={(value) => `${value.toFixed(1)}σ`} onChange={(value) => setParams((current) => ({ ...current, settleSigmas: value }))} />
+                  <Slider id="max-entry" label="Max entry price" value={params.maxEntryPrice ?? DEFAULT_MAX_ENTRY_PRICE} min={0.6} max={0.98} step={0.01} format={(value) => `${(value * 100).toFixed(0)}%`} onChange={(value) => setParams((current) => ({ ...current, maxEntryPrice: value }))} />
+                  <Slider id="tau-gate" label="Entry window" value={params.tauGateSec ?? DEFAULT_TAU_GATE_SEC} min={60} max={1800} step={60} format={(value) => `last ${Math.round(value / 60)}m`} onChange={(value) => setParams((current) => ({ ...current, tauGateSec: value }))} />
+                </>
+              ) : null}
+              {archetype === "marketmaker" ? (
+                <>
+                  <Slider id="quote-spread" label="Quote half-width" value={params.quoteSpread ?? DEFAULT_QUOTE_SPREAD} min={0.005} max={0.08} step={0.005} format={(value) => `${(value * 100).toFixed(1)}%`} onChange={(value) => setParams((current) => ({ ...current, quoteSpread: value }))} />
+                  <Slider id="quote-age" label="Quote lifetime" value={params.maxQuoteAgeSec ?? DEFAULT_MAX_QUOTE_AGE_SEC} min={15} max={600} step={15} format={(value) => `${value}s`} onChange={(value) => setParams((current) => ({ ...current, maxQuoteAgeSec: value }))} />
+                  <Slider id="flatten-sec" label="Flatten before expiry" value={params.flattenSec ?? DEFAULT_FLATTEN_SEC} min={15} max={300} step={15} format={(value) => `${value}s`} onChange={(value) => setParams((current) => ({ ...current, flattenSec: value }))} />
+                </>
+              ) : null}
             </div>
           </Panel>
         </section>

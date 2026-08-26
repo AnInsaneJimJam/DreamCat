@@ -175,6 +175,17 @@ export interface Fill {
   ts: number;
 }
 
+export function resolveFillSide(trade: unknown): "buy" | "sell" {
+  const row = trade as { side?: unknown; info?: { takerIsBid?: unknown; makerSide?: unknown } };
+  const takerIsBid = row.info?.takerIsBid;
+  if (typeof takerIsBid === "boolean") return takerIsBid ? "buy" : "sell";
+  const makerSide = row.info?.makerSide;
+  if (typeof makerSide === "string" && makerSide.length) {
+    return makerSide.toUpperCase().startsWith("SELL") ? "buy" : "sell";
+  }
+  return typeof row.side === "string" && row.side.toLowerCase() === "sell" ? "sell" : "buy";
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function watchBook(
@@ -238,7 +249,7 @@ export function watchFills(yesSymbol: string, onFills: (f: Fill[]) => void): () 
           raw.map((t) => ({
             price: t.price,
             qty: t.amount,
-            side: t.side === "sell" ? "sell" : "buy",
+            side: resolveFillSide(t),
             ts: Number(t.timestamp ?? Date.now()),
           }))
         );

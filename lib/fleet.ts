@@ -1,5 +1,13 @@
 import type { BookSnapshot, Fill } from "./dreamdex";
-import { initialSimState, stepSim, equityCurve, type Archetype, type SimState, type StrategyParams } from "./strategy";
+import {
+  equityCurve,
+  initialSimState,
+  stepSim,
+  type Archetype,
+  type MarketContext,
+  type SimState,
+  type StrategyParams,
+} from "./strategy";
 
 export interface FleetCatInput {
   slot: number;
@@ -16,6 +24,12 @@ export interface FleetCat extends FleetCatInput {
   equityHist: number[];
 }
 
+export interface FleetSlotData {
+  book: BookSnapshot;
+  fills: Fill[];
+  ctx?: MarketContext;
+}
+
 export const MAX_CATS = 5;
 
 export const ACCENTS = ["#f59e0b", "#22d3ee", "#f472b6", "#34d399", "#a78bfa"];
@@ -24,32 +38,29 @@ export function totalAlloc(cats: FleetCat[]): number {
   return cats.reduce((s, c) => s + c.allocPct, 0);
 }
 
+function scaleFor(cat: FleetCat, bankroll: number): number {
+  return (cat.allocPct / 100) * (bankroll / 1000);
+}
+
 export function catEquity(cat: FleetCat, book: BookSnapshot | null, bankroll: number): number {
   if (!book) return 0;
-  return equityCurve(cat.sim, book) * (cat.allocPct / 100) * (bankroll / 1000);
+  return equityCurve(cat.sim, book) * scaleFor(cat, bankroll);
 }
 
 export interface FleetTickInput {
   cats: FleetCat[];
-  data: Map<number, { book: BookSnapshot; fills: Fill[] }>;
+  data: Map<number, FleetSlotData>;
   bankroll: number;
   now: number;
 }
 
-export function tickFleet(
-  { cats, data, bankroll, now }: FleetTickInput
-): FleetCat[] {
+export function tickFleet({ cats, data, bankroll, now }: FleetTickInput): FleetCat[] {
   return cats.map((cat) => {
     const d = data.get(cat.slot);
     if (!d || !d.book.bids.length) return cat;
-    const sim = stepSim(
-      { archetype: cat.archetype, params: cat.params },
-      cat.sim,
-      d.book,
-      d.fills,
-      now
-    );
-    const eq = equityCurve(sim, d.book) * (cat.allocPct / 100) * (bankroll / 1000);
+    const cfg = { archetype: cat.archetype, params: cat.params };
+    const sim = stepSim(cfg, cat.sim, d.book, d.fills, now, d.ctx);
+    const eq = equityCurve(sim, d.book) * scaleFor(cat, bankroll);
     const equityHist = [...cat.equityHist, eq].slice(-80);
     return { ...cat, sim, equityHist };
   });

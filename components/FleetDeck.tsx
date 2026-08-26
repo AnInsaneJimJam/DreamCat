@@ -172,6 +172,8 @@ export default function FleetDeck() {
     return () => clearTimeout(kick);
   }, [markets, cats.length]);
 
+  const draftTemplate = TEMPLATES[draft.persona] ?? TEMPLATES[0];
+
   const deployCat = useCallback(() => {
     setDraftError("");
     if (!draft.marketId) {
@@ -186,7 +188,7 @@ export default function FleetDeck() {
       setDraftError("Available capital is fully allocated. Lower this share or remove a cat.");
       return;
     }
-    const template = TEMPLATES[draft.persona];
+    const template = draftTemplate;
     const slot = cats.reduce((max, cat) => Math.max(max, cat.slot), -1) + 1;
     const cat = freshCat({
       slot,
@@ -198,7 +200,7 @@ export default function FleetDeck() {
       allocPct: draft.allocPct,
     });
     updateFleetCats((current) => [...current, cat]);
-  }, [cats, draft]);
+  }, [cats, draft, draftTemplate]);
 
   const publishCat = useCallback(async (cat: FleetCat) => {
     setPublished((current) => ({ ...current, [cat.slot]: "sending" }));
@@ -224,7 +226,12 @@ export default function FleetDeck() {
   }, [markets]);
 
   const summary = useMemo(
-    () => fleetSummary(cats, new Map(cats.map((cat) => [cat.slot, { book: liveData[cat.slot]?.book ?? EMPTY_BOOK }])), bankroll),
+    () =>
+      fleetSummary(
+        cats,
+        new Map(cats.map((cat) => [cat.slot, { book: liveData[cat.slot]?.book ?? EMPTY_BOOK }])),
+        bankroll
+      ),
     [cats, liveData, bankroll]
   );
   const allocUsed = totalAlloc(cats);
@@ -358,6 +365,13 @@ export default function FleetDeck() {
                         <div className="flex items-center justify-between gap-2">
                           <span className={position.side === "YES" ? "text-buy" : "text-sell"}>{position.side}</span>
                           <span className="num text-right text-text-2">{fmtProb(position.entryPrice)} / {position.size} ctr / {Math.max(0, Math.round((now - position.openedAt) / 1000))}s</span>
+                        </div>
+                      ) : cat.sim.quotes?.bid || cat.sim.quotes?.ask ? (
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-brand">RESTING</span>
+                          <span className="num text-right text-text-2">
+                            {cat.sim.quotes.bid ? fmtProb(cat.sim.quotes.bid.price) : "—"} / {cat.sim.quotes.ask ? fmtProb(cat.sim.quotes.ask.price) : "—"}
+                          </span>
                         </div>
                       ) : (
                         <span className="text-text-2">Scanning for a signal</span>
