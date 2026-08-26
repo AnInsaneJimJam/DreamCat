@@ -21,7 +21,8 @@ import { listLiveMarkets, type LiveMarketRow } from "@/lib/dreamdex";
 import BurnerPanel from "@/components/BurnerPanel";
 import CatConfigModal from "@/components/CatConfigModal";
 import { TEMPLATES, type StrategyParams } from "@/lib/strategy";
-import { canTradeLive } from "@/lib/live-fleet";
+import { canTradeLive, isQuotingArchetype } from "@/lib/live-fleet";
+import type { QuotePolicy } from "@/lib/live-quotes";
 import type { Address } from "viem";
 import { useNow } from "@/lib/use-now";
 import {
@@ -36,6 +37,7 @@ import {
 import {
   EMPTY_BOOK,
   acknowledgeDroppedPositions,
+  acknowledgeOrphanQuotes,
   getFleetServerState,
   getFleetState,
   hydrateFleet,
@@ -44,6 +46,7 @@ import {
   setFleetMarkets,
   setFleetMode,
   setFleetRunning,
+  setQuotePolicy,
   subscribeFleet,
   updateFleetCatConfig,
   updateFleetCats,
@@ -135,7 +138,19 @@ function FleetEquityPlot({ cats }: { cats: FleetCat[] }) {
   );
 }
 
-function StateCell({ cat, now, mode, running }: { cat: FleetCat; now: number; mode: FleetMode; running: boolean }) {
+function StateCell({
+  cat,
+  now,
+  mode,
+  running,
+  quotePolicy,
+}: {
+  cat: FleetCat;
+  now: number;
+  mode: FleetMode;
+  running: boolean;
+  quotePolicy: QuotePolicy;
+}) {
   if (mode === "live") {
     if (!canTradeLive(cat.archetype)) return <span className="text-[11px] text-text-3">Paused in live run</span>;
     if (!running) return <span className="text-[11px] text-text-3">Waiting for deploy</span>;
@@ -143,6 +158,32 @@ function StateCell({ cat, now, mode, running }: { cat: FleetCat; now: number; mo
     if (live?.status === "submitting") return <span className="text-[11px] font-semibold text-brand">Signing order</span>;
     if (live?.status === "error") {
       return <span className="truncate text-[11px] text-sell" title={live.lastError}>{live.lastError ?? "Order rejected"}</span>;
+    }
+    if (isQuotingArchetype(cat.archetype)) {
+      const resting = live?.quotes;
+      if (resting?.bid || resting?.ask) {
+        return (
+          <span className="flex items-baseline gap-1.5">
+            <span className="text-[11px] font-semibold text-brand">ON BOOK</span>
+            <span className="num text-[11px] text-text-2">
+              {resting.bid ? fmtProb(resting.bid.price) : "—"} / {resting.ask ? fmtProb(resting.ask.price) : "—"}
+            </span>
+            {cat.sim.position ? (
+              <span className={`num text-[10px] ${cat.sim.position.side === "YES" ? "text-buy" : "text-sell"}`}>
+                {cat.sim.position.side} {cat.sim.position.size}
+              </span>
+            ) : null}
+          </span>
+        );
+      }
+      if (quotePolicy === "shadow") {
+        return (
+          <span className="flex items-baseline gap-1.5">
+            <span className="text-[11px] font-semibold text-text-2">SHADOW</span>
+            <span className="num text-[10px] text-text-3">{live?.shadowActions ?? 0} planned</span>
+          </span>
+        );
+      }
     }
   }
   const position = cat.sim.position;
@@ -178,7 +219,18 @@ type MarketStatus = "loading" | "ready" | "error";
 
 export default function FleetDeck() {
   const fleet = useSyncExternalStore(subscribeFleet, getFleetState, getFleetServerState);
-  const { cats, running, mode, bankroll, live: liveData, hydrated: storageReady, droppedPositions, burnerReady } = fleet;
+  const {
+    cats,
+    running,
+    mode,
+    bankroll,
+    live: liveData,
+    hydrated: storageReady,
+    droppedPositions,
+    burnerReady,
+    quotePolicy,
+    orphanQuotes,
+  } = fleet;
   const [markets, setMarkets] = useState<LiveMarketRow[]>([]);
   const [marketStatus, setMarketStatus] = useState<MarketStatus>("loading");
   const [marketError, setMarketError] = useState("");
@@ -330,6 +382,7 @@ export default function FleetDeck() {
   const editingCat = modal?.mode === "edit" ? cats.find((cat) => cat.slot === modal.slot) ?? null : null;
   const collateral = (markets.find((market) => market.collateral)?.collateral ?? null) as Address | null;
   const liveBlocked = cats.filter((cat) => !canTradeLive(cat.archetype));
+  const quotingCats = cats.filter((cat) => isQuotingArchetype(cat.archetype));
   const liveRealized = cats.reduce((total, cat) => total + (cat.live?.realizedPnl ?? 0), 0);
   const headlineEquity = mode === "live" ? liveRealized : summary.equity;
 
@@ -403,15 +456,56 @@ export default function FleetDeck() {
           </div>
         ) : null}
 
+        {orphanQuotes > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius-panel)] border border-brand/40 bg-brand/[0.06] px-3 py-2 text-xs text-text-2" role="status">
+            <WarningCircle aria-hidden="true" className="shrink-0 text-brand" size={15} weight="fill" />
+            <span>
+              {orphanQuotes === 1 ? "1 resting order was" : `${orphanQuotes} resting orders were`} left on the book by an earlier session and {orphanQuotes === 1 ? "has" : "have"} been cancelled.
+            </span>
+            <button type="button" onClick={acknowledgeOrphanQuotes} className="ml-auto min-h-11 cursor-pointer rounded-[var(--radius-control)] px-2 text-xs font-semibold text-brand hover:bg-brand/[0.12] md:min-h-9">
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
         {mode === "live" ? (
           <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius-panel)] border border-sell/40 bg-sell/[0.06] px-3 py-2 text-xs text-text-2" role="status">
             <Lightning aria-hidden="true" className="shrink-0 text-sell" size={15} weight="fill" />
             <span>
               Live run signs real Somnia Shannon transactions from the cat wallet and spends real testnet funds.
               {liveBlocked.length > 0
-                ? ` ${liveBlocked.map((cat) => cat.name).join(", ")} ${liveBlocked.length === 1 ? "rests quotes and stays paused" : "rest quotes and stay paused"} in live run.`
+                ? ` ${liveBlocked.map((cat) => cat.name).join(", ")} ${liveBlocked.length === 1 ? "stays paused" : "stay paused"} in live run.`
                 : ""}
             </span>
+            {quotingCats.length > 0 ? (
+              <div className="ml-auto flex items-center gap-2">
+                <span className="text-[11px] text-text-3">
+                  {quotingCats.map((cat) => cat.name).join(", ")} {quotingCats.length === 1 ? "quotes" : "quote"}
+                </span>
+                <div role="group" aria-label="Quote policy" className="flex items-center rounded-[var(--radius-control)] border border-line-strong bg-surface-1 p-0.5">
+                  {(["shadow", "single", "dual"] as const).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      aria-pressed={quotePolicy === option}
+                      title={
+                        option === "shadow"
+                          ? "Plan quotes and log them without signing anything"
+                          : option === "single"
+                            ? "Rest one side at a time"
+                            : "Rest both sides of the spread"
+                      }
+                      onClick={() => setQuotePolicy(option)}
+                      className={`min-h-9 cursor-pointer rounded-[calc(var(--radius-control)-2px)] px-2.5 text-[11px] font-semibold capitalize transition-colors duration-150 ${
+                        quotePolicy === option ? "bg-surface-3 text-text-1" : "text-text-3 hover:text-text-1"
+                      }`}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -545,7 +639,7 @@ export default function FleetDeck() {
                       </p>
 
                       <div className="col-span-2 col-start-2 min-w-0 lg:col-span-1 lg:col-start-auto">
-                        <StateCell cat={cat} mode={mode} now={now} running={running} />
+                        <StateCell cat={cat} mode={mode} now={now} quotePolicy={quotePolicy} running={running} />
                       </div>
 
                       <div className="col-span-2 col-start-2 min-w-0 lg:col-span-1 lg:col-start-auto">
@@ -568,7 +662,7 @@ export default function FleetDeck() {
                         <button type="button" onClick={() => void publishCat(cat)} disabled={publishState === "sending"} aria-label={publishState === "done" ? `Published ${cat.name} to board` : publishState === "fail" ? `Retry publishing ${cat.name}` : `Publish ${cat.name} to board`} className={`flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-[var(--radius-control)] transition-colors duration-150 disabled:cursor-wait disabled:opacity-50 ${publishState === "done" ? "text-buy" : publishState === "fail" ? "text-sell hover:bg-sell/[0.1]" : "text-text-3 hover:bg-surface-3 hover:text-brand"}`}>
                           {publishState === "sending" ? <CircleNotch aria-hidden="true" className="animate-spin" size={16} /> : publishState === "done" ? <Check aria-hidden="true" size={16} weight="bold" /> : publishState === "fail" ? <WarningCircle aria-hidden="true" size={16} weight="fill" /> : <UploadSimple aria-hidden="true" size={16} />}
                         </button>
-                        <button type="button" onClick={() => removeFleetCat(cat.slot)} aria-label={`Remove ${cat.name} from fleet`} className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-[var(--radius-control)] text-text-3 transition-colors duration-150 hover:bg-sell/[0.1] hover:text-sell">
+                        <button type="button" onClick={() => setModeError(removeFleetCat(cat.slot) ?? "")} aria-label={`Remove ${cat.name} from fleet`} className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-[var(--radius-control)] text-text-3 transition-colors duration-150 hover:bg-sell/[0.1] hover:text-sell">
                           <Trash aria-hidden="true" size={16} />
                         </button>
                       </div>
@@ -615,6 +709,7 @@ export default function FleetDeck() {
           maxAllocPct={remainingAlloc + editingCat.allocPct}
           cat={editingCat}
           running={running}
+          live={mode === "live"}
           onSubmit={(params, allocPct) => applyCatConfig(editingCat.slot, params, allocPct)}
           onClose={() => setModal(null)}
         />

@@ -4,17 +4,43 @@ import { watchBook, watchFills, type BookSnapshot, type Fill, type LiveMarketRow
 import { dedupeAccents, tickFleet, type FleetCat, type FleetSlotData } from "./fleet";
 import { acquireAsset, buildMarketContext } from "./market-context";
 import { SDK_GAS_LIMIT } from "./burner";
-import { TEMPLATES, flattenForReconfigure, stepSim, type Archetype, type MarketContext, type StrategyParams } from "./strategy";
+import {
+  TEMPLATES,
+  applyConfirmedQuoteFill,
+  flattenForReconfigure,
+  stepSim,
+  type Archetype,
+  type MarketContext,
+  type StrategyParams,
+} from "./strategy";
 import { gasHeadroom, type BurnerWallet, type GasHeadroom } from "./burner";
 import {
   canTradeLive,
   deriveIntent,
   executeIntent,
   initialLiveCatState,
+  isQuotingArchetype,
   realizedFromClose,
   type LiveCatState,
   type LiveIntent,
 } from "./live-fleet";
+import {
+  cancelQuote,
+  deriveQuoteActions,
+  describeQuoteAction,
+  emptyLiveQuotes,
+  fetchOpenQuoteOrders,
+  foldQuoteOrder,
+  forgetQuoteSymbol,
+  placeQuote,
+  quoteSymbolFor,
+  resolveFinalOrder,
+  sweepRestingOrders,
+  type LiveQuoteBook,
+  type QuoteAction,
+  type QuotePolicy,
+  type RestingOrderRef,
+} from "./live-quotes";
 
 const STORAGE_KEY = "dreamcat-fleet-v1";
 const KNOWN_ARCHETYPES = new Set<Archetype>(TEMPLATES.map((template) => template.archetype));
@@ -49,6 +75,8 @@ export interface FleetRunnerState {
   storageError: boolean;
   droppedPositions: number;
   burnerReady: boolean;
+  quotePolicy: QuotePolicy;
+  orphanQuotes: number;
 }
 
 const INITIAL_STATE: FleetRunnerState = {
@@ -61,6 +89,8 @@ const INITIAL_STATE: FleetRunnerState = {
   storageError: false,
   droppedPositions: 0,
   burnerReady: false,
+  quotePolicy: "dual",
+  orphanQuotes: 0,
 };
 
 interface MarketWatch {
@@ -95,7 +125,13 @@ function persist(immediate: boolean) {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ cats: state.cats, running: state.running, mode: state.mode, bankroll: state.bankroll })
+      JSON.stringify({
+        cats: state.cats,
+        running: state.running,
+        mode: state.mode,
+        bankroll: state.bankroll,
+        quotePolicy: state.quotePolicy,
+      })
     );
   } catch {
     if (!state.storageError) commit({ storageError: true });
@@ -184,6 +220,12 @@ function syncWatches() {
 
 let burner: BurnerWallet | null = null;
 const inFlight = new Set<number>();
+/**
+ * Slots whose params changed while they held a real on-chain position. The position
+ * cannot simply be dropped from sim state — the tokens are real — so the next live tick
+ * turns the request into an actual close before the new params take over.
+ */
+const flattenRequests = new Set<number>();
 const errorCooldown = new Map<number, number>();
 const ERROR_COOLDOWN_MS = 15000;
 const GAS_CHECK_MS = 10000;
@@ -215,7 +257,10 @@ function gasShortfallMessage(status: GasHeadroom): string {
 }
 
 export function setFleetBurner(next: BurnerWallet | null): void {
+  // Pull resting orders while the old key can still sign the cancels.
+  if (!next && burner) releaseAllQuotes();
   burner = next;
+  quoteSweeps.clear();
   if (!next && state.mode === "live") {
     commit({ burnerReady: false, mode: "dry" });
     persist(true);
@@ -265,6 +310,250 @@ function releaseSlots(kept: FleetCat[]): void {
   const alive = new Set(kept.map((cat) => cat.slot));
   for (const slot of [...inFlight]) if (!alive.has(slot)) inFlight.delete(slot);
   for (const slot of [...errorCooldown.keys()]) if (!alive.has(slot)) errorCooldown.delete(slot);
+  for (const slot of [...quoteInFlight]) if (!alive.has(slot)) quoteInFlight.delete(slot);
+  for (const slot of [...flattenRequests]) if (!alive.has(slot)) flattenRequests.delete(slot);
+  for (const map of [quoteSubmitAt, quoteSyncAt, quoteLogAt]) {
+    for (const slot of [...map.keys()]) if (!alive.has(slot)) map.delete(slot);
+  }
+}
+
+const QUOTE_SYNC_MS = 3000;
+const QUOTE_LOG_MS = 10000;
+/**
+ * Every requote is a cancel plus a place — two transactions. The strategy's requote
+ * threshold was tuned against a free simulator, so the runner puts a floor under how
+ * often a cat may re-price. Pure withdrawals bypass it: taking risk off is never delayed.
+ */
+export const QUOTE_MIN_INTERVAL_MS = 5000;
+
+const quoteInFlight = new Set<number>();
+const quoteSubmitAt = new Map<number, number>();
+const quoteSyncAt = new Map<number, number>();
+const quoteLogAt = new Map<number, number>();
+const quoteSweeps = new Map<string, "pending" | "done">();
+
+function guardSlot(slot: number, token: string, patch: (cat: FleetCat) => FleetCat): void {
+  if (state.mode !== "live") return;
+  const current = state.cats.find((item) => item.slot === slot);
+  if (!current || catToken(current) !== token) return;
+  patchCat(slot, patch);
+}
+
+function restingRefs(live: LiveCatState): RestingOrderRef[] {
+  const quotes = live.quotes ?? emptyLiveQuotes;
+  return [quotes.bid, quotes.ask].filter((ref): ref is RestingOrderRef => ref != null);
+}
+
+function withQuotes(live: LiveCatState, quotes: LiveQuoteBook): LiveCatState {
+  return { ...live, quotes: quotes.bid || quotes.ask ? quotes : undefined };
+}
+
+/**
+ * Fold the chain's view of this cat's resting orders back into its sim state. Fills are
+ * never inferred from the public tape in live mode — a quote counts as filled only when
+ * the indexer says this wallet's own order filled.
+ */
+function syncQuoteOrders(cat: FleetCat, now: number): void {
+  const active = burner;
+  if (!active) return;
+  const refs = restingRefs(liveOf(cat));
+  if (!refs.length) return;
+  const last = quoteSyncAt.get(cat.slot) ?? 0;
+  if (now - last < QUOTE_SYNC_MS) return;
+  quoteSyncAt.set(cat.slot, now);
+
+  const slot = cat.slot;
+  const token = catToken(cat);
+  const symbol = refs[0].symbol;
+
+  void (async () => {
+    const updates: Array<{ ref: RestingOrderRef; row: Awaited<ReturnType<typeof resolveFinalOrder>> }> = [];
+    try {
+      const open = await fetchOpenQuoteOrders(active.privateKey, symbol);
+      const byId = new Map(open.map((row) => [row.id, row]));
+      for (const ref of refs) {
+        const row = byId.get(ref.id);
+        if (row) {
+          updates.push({ ref, row });
+          continue;
+        }
+        updates.push({ ref, row: await resolveFinalOrder(active.privateKey, symbol, ref.id) });
+      }
+    } catch {
+      return;
+    }
+
+    const at = Date.now();
+    guardSlot(slot, token, (current) => {
+      let sim = current.sim;
+      const live = liveOf(current);
+      const quotes: LiveQuoteBook = { ...(live.quotes ?? emptyLiveQuotes) };
+      let fills = live.fills;
+      let realized = live.realizedPnl;
+
+      for (const { ref, row } of updates) {
+        if (quotes[ref.side]?.id !== ref.id) continue;
+        const update = foldQuoteOrder(ref, row);
+        if (!update.resolved) continue;
+        if (update.event) {
+          const before = sim.realizedPnl;
+          sim = applyConfirmedQuoteFill(sim, update.event.side, update.event.price, update.event.size, at);
+          realized += sim.realizedPnl - before;
+          fills += 1;
+        }
+        quotes[ref.side] = update.ref;
+      }
+
+      return {
+        ...current,
+        sim,
+        live: withQuotes(
+          { ...live, fills, realizedPnl: realized, entryPrice: sim.position?.entryPrice ?? null },
+          quotes
+        ),
+      };
+    });
+  })();
+}
+
+function runQuoteActions(cat: FleetCat, market: LiveMarketRow, actions: QuoteAction[], now: number): void {
+  const active = burner;
+  if (!active || !actions.length) return;
+  const slot = cat.slot;
+  const token = catToken(cat);
+  quoteInFlight.add(slot);
+
+  void (async () => {
+    for (const action of actions) {
+      try {
+        if (action.kind === "cancel") {
+          await cancelQuote(active.privateKey, action.order);
+          guardSlot(slot, token, (current) => {
+            const live = liveOf(current);
+            const quotes = { ...(live.quotes ?? emptyLiveQuotes) };
+            if (quotes[action.side]?.id === action.order.id) quotes[action.side] = null;
+            return {
+              ...current,
+              live: withQuotes(
+                { ...live, status: "idle", cancels: (live.cancels ?? 0) + 1, lastError: undefined },
+                quotes
+              ),
+            };
+          });
+          continue;
+        }
+
+        const placed = await placeQuote(active.privateKey, market, action.side, action.price, action.size);
+        guardSlot(slot, token, (current) => {
+          let sim = current.sim;
+          const live = liveOf(current);
+          const quotes = { ...(live.quotes ?? emptyLiveQuotes) };
+          let fills = live.fills;
+          let realized = live.realizedPnl;
+
+          if (placed.filled > 0) {
+            const before = sim.realizedPnl;
+            sim = applyConfirmedQuoteFill(sim, action.side, placed.avgPrice, placed.filled, now);
+            realized += sim.realizedPnl - before;
+            fills += 1;
+          }
+          quotes[action.side] = placed.ref;
+
+          return {
+            ...current,
+            sim: placed.ref || placed.filled > 0
+              ? sim
+              : appendLiveNote(sim, now, `QUOTE ${action.side} ${action.size} @ ${(action.price * 100).toFixed(1)}% did not rest · ${placed.status}`),
+            live: withQuotes(
+              {
+                ...live,
+                status: "idle",
+                orders: live.orders + 1,
+                fills,
+                realizedPnl: realized,
+                entryPrice: sim.position?.entryPrice ?? null,
+                lastHash: placed.hash ?? live.lastHash,
+                lastError: undefined,
+              },
+              quotes
+            ),
+          };
+        });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "The quote was rejected.";
+        errorCooldown.set(slot, Date.now() + ERROR_COOLDOWN_MS);
+        forgetQuoteSymbol(market.id);
+        guardSlot(slot, token, (current) => ({
+          ...current,
+          live: { ...liveOf(current), status: "error", lastError: message },
+          sim: appendLiveNote(current.sim, now, `${describeQuoteAction(action)} rejected · ${message}`),
+        }));
+        break;
+      }
+    }
+    quoteInFlight.delete(slot);
+    quoteSyncAt.delete(slot);
+    persist(false);
+  })();
+}
+
+/** Best-effort teardown: pull every order this cat has resting and forget the refs. */
+function cancelCatQuotes(cat: FleetCat): void {
+  const active = burner;
+  const refs = restingRefs(liveOf(cat));
+  if (!refs.length) return;
+  const slot = cat.slot;
+  const token = catToken(cat);
+  if (active) {
+    void (async () => {
+      for (const ref of refs) {
+        try {
+          await cancelQuote(active.privateKey, ref);
+        } catch {
+          continue;
+        }
+      }
+    })();
+  }
+  guardSlot(slot, token, (current) => ({
+    ...current,
+    live: withQuotes({ ...liveOf(current), status: "idle" }, emptyLiveQuotes),
+  }));
+}
+
+function releaseAllQuotes(cats: FleetCat[] = state.cats): void {
+  for (const cat of cats) {
+    if (!isQuotingArchetype(cat.archetype)) continue;
+    cancelCatQuotes(cat);
+  }
+}
+
+/**
+ * Resting orders survive a page reload; the refs pointing at them do not. Sweep the burner's
+ * open orders on every watched window once per session so a refresh cannot strand a quote.
+ */
+function sweepOrphanQuotes(): void {
+  const active = burner;
+  if (!active || state.mode !== "live") return;
+  const quoting = state.cats.filter((cat) => isQuotingArchetype(cat.archetype));
+  if (!quoting.length) return;
+
+  for (const cat of quoting) {
+    const market = tradableMarket(cat.marketId);
+    if (!market) continue;
+    if (quoteSweeps.has(market.id)) continue;
+    quoteSweeps.set(market.id, "pending");
+    void (async () => {
+      try {
+        const symbol = await quoteSymbolFor(market);
+        const cancelled = await sweepRestingOrders(active.privateKey, symbol);
+        quoteSweeps.set(market.id, "done");
+        if (cancelled > 0) commit({ orphanQuotes: state.orphanQuotes + cancelled });
+      } catch {
+        quoteSweeps.delete(market.id);
+      }
+    })();
+  }
 }
 
 function liveTick(now: number): void {
@@ -274,10 +563,15 @@ function liveTick(now: number): void {
   const shortOfGas = gasStatus != null && !gasStatus.ok ? gasShortfallMessage(gasStatus) : null;
   const data = slotDataFor(state.cats);
   const pending: Array<{ cat: FleetCat; market: LiveMarketRow; intent: LiveIntent; proposed: FleetCat["sim"] }> = [];
+  const quotePending: Array<{ cat: FleetCat; market: LiveMarketRow; actions: QuoteAction[] }> = [];
+  const quoteTeardown: FleetCat[] = [];
+
+  sweepOrphanQuotes();
 
   const cats = state.cats.map((cat) => {
     const slotData = data.get(cat.slot);
     const book = slotData?.book ?? null;
+    const quoting = isQuotingArchetype(cat.archetype);
     const withEquity = (next: FleetCat): FleetCat => ({
       ...next,
       equityHist: [...next.equityHist, liveEquity(next, book)].slice(-80),
@@ -285,40 +579,98 @@ function liveTick(now: number): void {
 
     if (!canTradeLive(cat.archetype)) return withEquity(cat);
     if (inFlight.has(cat.slot)) return withEquity(cat);
+    if (quoting && quoteInFlight.has(cat.slot)) {
+      syncQuoteOrders(cat, now);
+      return withEquity(cat);
+    }
     const cooldown = errorCooldown.get(cat.slot);
     if (cooldown != null && now < cooldown) return withEquity(cat);
+    if (quoting) syncQuoteOrders(cat, now);
     if (!slotData || !slotData.book.bids.length) return withEquity(cat);
     const market = tradableMarket(cat.marketId);
     if (!market) {
+      if (quoting && restingRefs(liveOf(cat)).length) quoteTeardown.push(cat);
       if (cat.sim.position == null) return withEquity(cat);
       const stranded = "This window expired while the position was open. The tokens are still in the cat wallet and settle by claiming, not by selling.";
       if (liveOf(cat).lastError === stranded) return withEquity(cat);
       return withEquity({ ...cat, live: { ...liveOf(cat), status: "error", lastError: stranded } });
     }
 
-    const proposed = stepSim(
-      { archetype: cat.archetype, params: cat.params },
-      cat.sim,
-      slotData.book,
-      slotData.fills,
-      now,
-      slotData.ctx
-    );
+    const flattening = flattenRequests.has(cat.slot);
+    const proposed = flattening
+      ? flattenForReconfigure(cat.sim, slotData.book, now)
+      : stepSim(
+          { archetype: cat.archetype, params: cat.params, inferQuoteFills: quoting ? false : undefined },
+          cat.sim,
+          slotData.book,
+          slotData.fills,
+          now,
+          slotData.ctx
+        );
     const intent = deriveIntent(cat.sim, proposed, slotData.book);
 
-    if (!intent) return withEquity(proposed === cat.sim ? cat : { ...cat, sim: proposed });
-
-    if (shortOfGas) {
-      const live = liveOf(cat);
-      if (live.lastError === shortOfGas) return withEquity(cat);
-      return withEquity({ ...cat, live: { ...live, status: "error", lastError: shortOfGas } });
+    if (intent) {
+      if (shortOfGas) {
+        const live = liveOf(cat);
+        if (live.lastError === shortOfGas) return withEquity(cat);
+        return withEquity({ ...cat, live: { ...live, status: "error", lastError: shortOfGas } });
+      }
+      // A quoting cat only ever produces a taker intent to force-flatten (stop-loss,
+      // time-stop, flatten-into-expiry). Pull its resting orders before crossing.
+      if (quoting && restingRefs(liveOf(cat)).length) quoteTeardown.push(cat);
+      flattenRequests.delete(cat.slot);
+      pending.push({ cat, market, intent, proposed });
+      return withEquity({ ...cat, live: { ...liveOf(cat), status: "submitting", lastError: undefined } });
     }
 
-    pending.push({ cat, market, intent, proposed });
-    return withEquity({ ...cat, live: { ...liveOf(cat), status: "submitting", lastError: undefined } });
+    // Nothing was open, so the reconfigure needed no close.
+    if (flattening) flattenRequests.delete(cat.slot);
+
+    if (!quoting) return withEquity(proposed === cat.sim ? cat : { ...cat, sim: proposed });
+
+    const live = liveOf(cat);
+    const actions = deriveQuoteActions(proposed.quotes, live.quotes ?? emptyLiveQuotes, {
+      singleSided: state.quotePolicy === "single",
+    });
+    const stepped = proposed === cat.sim ? cat : { ...cat, sim: proposed };
+    if (!actions.length) return withEquity(stepped);
+
+    if (state.quotePolicy === "shadow") {
+      const lastLog = quoteLogAt.get(cat.slot) ?? 0;
+      const shadow = { ...liveOf(stepped), shadowActions: (live.shadowActions ?? 0) + actions.length };
+      if (now - lastLog < QUOTE_LOG_MS) return withEquity({ ...stepped, live: shadow });
+      quoteLogAt.set(cat.slot, now);
+      return withEquity({
+        ...stepped,
+        sim: appendLiveNote(stepped.sim, now, `SHADOW · ${actions.map(describeQuoteAction).join(" · ")}`),
+        live: shadow,
+      });
+    }
+
+    if (shortOfGas) {
+      if (live.lastError === shortOfGas) return withEquity(stepped);
+      return withEquity({ ...stepped, live: { ...live, status: "error", lastError: shortOfGas } });
+    }
+
+    // Hold placement until the orphan sweep on this window has finished, or the sweep
+    // would cancel the quote this tick is about to rest.
+    if (quoteSweeps.get(market.id) !== "done") return withEquity(stepped);
+
+    // Only re-pricing is churn. Resting a fresh quote, and pulling one, go straight out.
+    const requoting = actions.some((action) => action.kind === "cancel" && action.reason === "requote");
+    if (requoting && now - (quoteSubmitAt.get(cat.slot) ?? 0) < QUOTE_MIN_INTERVAL_MS) {
+      return withEquity(stepped);
+    }
+    quoteSubmitAt.set(cat.slot, now);
+
+    quotePending.push({ cat, market, actions });
+    return withEquity({ ...stepped, live: { ...live, status: "submitting", lastError: undefined } });
   });
 
   commit({ cats });
+
+  for (const cat of quoteTeardown) cancelCatQuotes(cat);
+  for (const { cat, market, actions } of quotePending) runQuoteActions(cat, market, actions, now);
 
   for (const { cat, market, intent, proposed } of pending) {
     const slot = cat.slot;
@@ -475,27 +827,45 @@ export function hydrateFleet(): void {
   let running = false;
   let mode: FleetMode = INITIAL_STATE.mode;
   let bankroll = INITIAL_STATE.bankroll;
+  let quotePolicy = INITIAL_STATE.quotePolicy;
   let storageError = false;
   let droppedPositions = 0;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as { cats?: FleetCat[]; running?: boolean; mode?: FleetMode; bankroll?: number };
+      const parsed = JSON.parse(raw) as {
+        cats?: FleetCat[];
+        running?: boolean;
+        mode?: FleetMode;
+        bankroll?: number;
+        quotePolicy?: QuotePolicy;
+      };
       if (Array.isArray(parsed.cats)) {
         const supported = parsed.cats.filter((cat) => KNOWN_ARCHETYPES.has(cat.archetype));
         droppedPositions = supported.filter((cat) => cat.sim?.position != null).length;
-        cats = dedupeAccents(supported.map((cat) => ({ ...cat, sim: { ...cat.sim, position: null, quotes: undefined, log: [] } })));
+        // Order refs cannot outlive the session that placed them; the orphan sweep pulls
+        // whatever they pointed at once the burner is back.
+        cats = dedupeAccents(
+          supported.map((cat) => ({
+            ...cat,
+            sim: { ...cat.sim, position: null, quotes: undefined, log: [] },
+            live: cat.live ? { ...cat.live, status: "idle" as const, quotes: undefined, lastError: undefined } : undefined,
+          }))
+        );
       }
       running = parsed.running === true && cats.length > 0;
       if (parsed.mode === "live" || parsed.mode === "dry") mode = parsed.mode;
       if (typeof parsed.bankroll === "number" && Number.isFinite(parsed.bankroll) && parsed.bankroll >= 100) {
         bankroll = parsed.bankroll;
       }
+      if (parsed.quotePolicy === "shadow" || parsed.quotePolicy === "single" || parsed.quotePolicy === "dual") {
+        quotePolicy = parsed.quotePolicy;
+      }
     }
   } catch {
     storageError = true;
   }
-  state = { ...state, cats, running, mode, bankroll, hydrated: true, storageError, droppedPositions };
+  state = { ...state, cats, running, mode, bankroll, quotePolicy, hydrated: true, storageError, droppedPositions };
   emit();
   syncRun();
 }
@@ -507,9 +877,23 @@ export function setFleetMarkets(rows: LiveMarketRow[]): void {
 
 export function setFleetRunning(running: boolean): void {
   if (running === state.running) return;
+  if (!running) releaseAllQuotes();
   commit({ running });
   persist(true);
   syncRun();
+}
+
+export function setQuotePolicy(policy: QuotePolicy): void {
+  if (policy === state.quotePolicy) return;
+  // "single" narrows the desired book, which the reconciler cancels down to on its own.
+  if (policy === "shadow") releaseAllQuotes();
+  commit({ quotePolicy: policy });
+  persist(true);
+}
+
+export function acknowledgeOrphanQuotes(): void {
+  if (state.orphanQuotes === 0) return;
+  commit({ orphanQuotes: 0 });
 }
 
 export function setFleetMode(mode: FleetMode): string | null {
@@ -521,6 +905,9 @@ export function setFleetMode(mode: FleetMode): string | null {
       return `${open.map((cat) => cat.name).join(", ")} still hold real positions on chain. Let them close, or close those positions yourself, before returning to dry run.`;
     }
   }
+  releaseAllQuotes();
+  quoteSweeps.clear();
+  flattenRequests.clear();
   const data = slotDataFor(state.cats);
   const now = Date.now();
   const cats = state.cats.map((cat) => ({
@@ -543,6 +930,8 @@ export function setFleetBankroll(bankroll: number): void {
 export function updateFleetCats(updater: (cats: FleetCat[]) => FleetCat[]): void {
   const cats = updater(state.cats);
   if (cats === state.cats) return;
+  const alive = new Set(cats.map((cat) => cat.slot));
+  releaseAllQuotes(state.cats.filter((cat) => !alive.has(cat.slot)));
   releaseSlots(cats);
   commit({ cats: dedupeAccents(cats), running: cats.length === 0 ? false : state.running });
   persist(true);
@@ -552,12 +941,19 @@ export function updateFleetCats(updater: (cats: FleetCat[]) => FleetCat[]): void
 export function updateFleetCatConfig(slot: number, params: StrategyParams, allocPct: number): void {
   const target = state.cats.find((cat) => cat.slot === slot);
   if (!target) return;
+  if (isQuotingArchetype(target.archetype)) cancelCatQuotes(target);
   const data = state.running ? slotDataFor(state.cats) : null;
   const now = Date.now();
+  // A live position is real tokens in the cat wallet. Dropping it from sim state would
+  // leave nothing to sell it, so ask the runner to close it on chain instead and let the
+  // new params take over once the close lands.
+  const deferFlatten = state.mode === "live" && state.running && target.sim.position != null;
+  if (deferFlatten) flattenRequests.add(slot);
+
   const cats = state.cats.map((cat) => {
     if (cat.slot !== slot) return cat;
     const next = { ...cat, params, allocPct };
-    if (!state.running) return next;
+    if (!state.running || deferFlatten) return next;
     return { ...next, sim: flattenForReconfigure(cat.sim, data?.get(slot)?.book ?? null, now) };
   });
   commit({ cats });
@@ -565,8 +961,15 @@ export function updateFleetCatConfig(slot: number, params: StrategyParams, alloc
   syncRun();
 }
 
-export function removeFleetCat(slot: number): void {
+export function removeFleetCat(slot: number): string | null {
+  const target = state.cats.find((cat) => cat.slot === slot);
+  if (!target) return null;
+  // Dropping the cat drops the only thing that knows how to sell its tokens.
+  if (state.mode === "live" && target.sim.position != null) {
+    return `${target.name} still holds a real position on chain. Let it close, or close that position yourself, before dropping the cat.`;
+  }
   updateFleetCats((cats) => cats.filter((cat) => cat.slot !== slot));
+  return null;
 }
 
 export function acknowledgeDroppedPositions(): void {

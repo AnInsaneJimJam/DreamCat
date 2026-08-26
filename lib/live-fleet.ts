@@ -4,6 +4,7 @@ import type { Hex } from "viem";
 import { getExchange, type BookSnapshot, type LiveMarketRow } from "./dreamdex";
 import { serializeOrder } from "./order-queue";
 import { resolveExecutableMarket } from "./trading";
+import type { LiveQuoteBook } from "./live-quotes";
 import type { Archetype, SimState } from "./strategy";
 
 export const LIVE_CAPABLE_ARCHETYPES: readonly Archetype[] = [
@@ -12,10 +13,18 @@ export const LIVE_CAPABLE_ARCHETYPES: readonly Archetype[] = [
   "fade",
   "fairvalue",
   "theta",
+  "marketmaker",
 ];
+
+/** Archetypes that rest limit orders instead of crossing the spread with market orders. */
+export const QUOTING_ARCHETYPES: readonly Archetype[] = ["marketmaker"];
 
 export function canTradeLive(archetype: Archetype): boolean {
   return LIVE_CAPABLE_ARCHETYPES.includes(archetype);
+}
+
+export function isQuotingArchetype(archetype: Archetype): boolean {
+  return QUOTING_ARCHETYPES.includes(archetype);
 }
 
 export type LiveIntent =
@@ -30,6 +39,9 @@ export interface LiveCatState {
   entryPrice: number | null;
   lastHash?: string;
   lastError?: string;
+  quotes?: LiveQuoteBook;
+  shadowActions?: number;
+  cancels?: number;
 }
 
 export const initialLiveCatState: LiveCatState = {

@@ -24,6 +24,7 @@ export interface StrategyParams {
 export interface StrategyConfig {
   archetype: Archetype;
   params: StrategyParams;
+  inferQuoteFills?: boolean;
 }
 
 export interface MarketContext {
@@ -269,6 +270,65 @@ function closePosition(state: SimState, pos: SimPosition, mark: number, now: num
   );
 }
 
+export type QuoteFillSide = "bid" | "ask";
+
+export function applyConfirmedQuoteFill(
+  state: SimState,
+  side: QuoteFillSide,
+  price: number,
+  size: number,
+  now: number,
+  fair: number | null = null
+): SimState {
+  if (!(size > 0) || !(price > 0) || !(price < 1)) return state;
+  const quotes = state.quotes ?? EMPTY_QUOTES;
+  const cleared: QuoteBook = side === "bid" ? { bid: null, ask: quotes.ask } : { bid: quotes.bid, ask: null };
+  const pos = state.position;
+  const outcome: "YES" | "NO" = side === "bid" ? "YES" : "NO";
+  const entry = side === "bid" ? price : 1 - price;
+  const fairLabel = fair == null ? "n/a" : `${(fair * 100).toFixed(1)}%`;
+
+  if (!pos) {
+    return appendLog(
+      { ...state, position: { side: outcome, entryPrice: entry, size, openedAt: now }, quotes: cleared },
+      {
+        ts: now,
+        action: "open",
+        detail: `${side === "bid" ? "BID HIT" : "ASK LIFTED"} ${size} YES @ ${(price * 100).toFixed(1)}% · confirmed on chain · fair ${fairLabel}`,
+      }
+    );
+  }
+
+  if (pos.side === outcome) {
+    const total = pos.size + size;
+    const entryPrice = (pos.entryPrice * pos.size + entry * size) / total;
+    return appendLog(
+      { ...state, position: { ...pos, entryPrice, size: total }, quotes: cleared },
+      {
+        ts: now,
+        action: "open",
+        detail: `ADD ${size} ${outcome} @ ${(entry * 100).toFixed(1)}% · avg ${(entryPrice * 100).toFixed(1)}% on ${total}`,
+      }
+    );
+  }
+
+  const mark = pos.side === "YES" ? price : 1 - price;
+  const label = `${pos.side === "YES" ? "SELL" : "BUY"} ${pos.size} YES resting`;
+  if (size >= pos.size - 1e-9) {
+    return { ...closePosition(state, pos, mark, now, ["quote-filled"], label), quotes: cleared };
+  }
+  const held = pos.size - size;
+  const pnl = (mark - pos.entryPrice) * size;
+  return appendLog(
+    { ...state, position: { ...pos, size: held }, realizedPnl: state.realizedPnl + pnl, quotes: cleared },
+    {
+      ts: now,
+      action: "close",
+      detail: `PARTIAL ${size} ${pos.side} @ ${(mark * 100).toFixed(1)}% · ${held.toFixed(2)} still held · ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} tUSDC`,
+    }
+  );
+}
+
 function stepMarketMaker(
   cfg: StrategyConfig,
   state: SimState,
@@ -289,6 +349,7 @@ function stepMarketMaker(
   const secToExpiry = ctx ? (ctx.expiry - now) / 1000 : null;
   const quotes = state.quotes ?? EMPTY_QUOTES;
   const pos = state.position;
+  const infer = cfg.inferQuoteFills !== false;
 
   if (pos) {
     const heldSec = (now - pos.openedAt) / 1000;
@@ -302,7 +363,7 @@ function stepMarketMaker(
     }
 
     if (pos.side === "YES") {
-      if (quotes.ask && restingAskFilled(quotes.ask, book, fills)) {
+      if (infer && quotes.ask && restingAskFilled(quotes.ask, book, fills)) {
         return { ...closePosition(state, pos, quotes.ask.price, now, ["quote-filled"], `SELL ${pos.size} YES resting`), quotes: EMPTY_QUOTES };
       }
       const desiredAsk = clampQuote(Math.max(pos.entryPrice + takeProfit, center + quoteSpread, bestBid + QUOTE_QUEUE_GAP));
@@ -310,7 +371,7 @@ function stepMarketMaker(
       return { ...state, quotes: { bid: null, ask } };
     }
 
-    if (quotes.bid && restingBidFilled(quotes.bid, book, fills)) {
+    if (infer && quotes.bid && restingBidFilled(quotes.bid, book, fills)) {
       return { ...closePosition(state, pos, 1 - quotes.bid.price, now, ["quote-filled"], `BUY ${pos.size} YES resting`), quotes: EMPTY_QUOTES };
     }
     const shortAt = 1 - pos.entryPrice;
@@ -323,14 +384,14 @@ function stepMarketMaker(
     return state.quotes ? { ...state, quotes: EMPTY_QUOTES } : state;
   }
 
-  if (quotes.bid && restingBidFilled(quotes.bid, book, fills)) {
+  if (infer && quotes.bid && restingBidFilled(quotes.bid, book, fills)) {
     const filled = quotes.bid;
     return appendLog(
       { ...state, position: { side: "YES", entryPrice: filled.price, size: filled.size, openedAt: now }, quotes: EMPTY_QUOTES },
       { ts: now, action: "open", detail: `BID HIT ${filled.size} YES @ ${(filled.price * 100).toFixed(1)}% · fair ${fair == null ? "n/a" : `${(fair * 100).toFixed(1)}%`}` }
     );
   }
-  if (quotes.ask && restingAskFilled(quotes.ask, book, fills)) {
+  if (infer && quotes.ask && restingAskFilled(quotes.ask, book, fills)) {
     const filled = quotes.ask;
     return appendLog(
       { ...state, position: { side: "NO", entryPrice: 1 - filled.price, size: filled.size, openedAt: now }, quotes: EMPTY_QUOTES },

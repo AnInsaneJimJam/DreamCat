@@ -1,5 +1,5 @@
 import { deriveIntent, canTradeLive, realizedFromClose, type LiveIntent } from "../lib/live-fleet";
-import { initialSimState, stepSim, TEMPLATES, type Archetype, type MarketContext, type SimState, type StrategyParams } from "../lib/strategy";
+import { flattenForReconfigure, initialSimState, stepSim, TEMPLATES, type Archetype, type MarketContext, type SimState, type StrategyParams } from "../lib/strategy";
 import type { BookSnapshot, Fill } from "../lib/dreamdex";
 
 let failures = 0;
@@ -143,6 +143,37 @@ for (const e of exitCases) {
   const ok = check(intent?.kind === "close", `${e.archetype}/${e.reason}: no sell produced`);
   const detail = closed.log[0]?.detail ?? "";
   console.log(`  ${e.archetype.padEnd(11)} ${e.reason.padEnd(14)} ${ok ? "sell ok" : "NO SELL"}  ${detail.split(" · ").slice(1, 2).join("")}`);
+}
+
+console.log("\nreconfiguring a live cat must sell, not strand\n");
+
+// Editing params while a cat holds a real on-chain position used to null the position in
+// sim state, leaving nothing to ever sell the tokens. The runner now routes the same
+// reconfigure through flattenForReconfigure + deriveIntent, which must produce a close.
+for (const c of cases) {
+  const cfg = { archetype: c.archetype, params: params(c.archetype) };
+  const held = stepSim(cfg, initialSimState, c.book, c.fills, T0, c.ctx);
+  if (!check(held.position != null, `${c.archetype}: could not open a position to reconfigure`)) continue;
+
+  const flattened = flattenForReconfigure(held, c.exit.book, c.exit.at);
+  const intent = deriveIntent(held, flattened, c.exit.book);
+  const ok =
+    check(intent != null, `${c.archetype}: reconfigure produced no sell — the position would be stranded on chain`) &&
+    check(intent!.kind === "close", `${c.archetype}: reconfigure intent is not a close`) &&
+    check(intent!.outcome === held.position!.side, `${c.archetype}: reconfigure sells the wrong outcome`) &&
+    check(Math.abs(intent!.size - held.position!.size) < 1e-9, `${c.archetype}: reconfigure sells the wrong size`);
+  console.log(`  ${c.archetype.padEnd(11)} ${ok ? `sell ok  ${intent!.size} ${intent!.outcome} @ ${(intent!.price * 100).toFixed(1)}%` : "NO SELL"}`);
+}
+
+{
+  // With no book to mark against, the position must still not silently vanish mid-flight:
+  // the sim clears it and says so, and the runner keeps the cat until the close lands.
+  const cfg = { archetype: "maker" as Archetype, params: params("maker") };
+  const held = stepSim(cfg, initialSimState, bookAt(0.50, 0.52, 90, 10), [], T0);
+  const flattened = flattenForReconfigure(held, null, T0 + 1000);
+  check(flattened.position == null, "a bookless reconfigure left a position with no mark");
+  check(/reconfigured/.test(flattened.log[0]?.detail ?? ""), "a bookless reconfigure did not record why the position cleared");
+  console.log("  bookless reconfigure records the clear instead of silently dropping it");
 }
 
 if (failures > 0) { console.error(`\n${failures} check(s) failed`); process.exit(1); }
