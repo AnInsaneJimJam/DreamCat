@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import StrategyLab from "@/components/StrategyLab";
+import BotBuilder from "@/components/BotBuilder";
 
 export const metadata: Metadata = {
-  title: "Strategy Lab",
-  description: "Shape and paper-test strategy parameters against live Somnia event-contract books.",
+  title: "Bot Builder",
+  description: "Configure, validate, and export a DreamDEX spot or event-contract bot.",
 };
 
 export default function LabPage() {
-  return <StrategyLab />;
+  return <BotBuilder />;
 }

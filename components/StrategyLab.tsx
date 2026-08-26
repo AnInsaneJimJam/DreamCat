@@ -115,13 +115,23 @@ export default function StrategyLab() {
 
   const template = useMemo(() => TEMPLATES.find((t) => t.archetype === archetype)!, [archetype]);
 
+  const resetSimulation = useCallback(() => {
+    setRunning(false);
+    setSim(initialSimState);
+    setBook(null);
+    bookRef.current = null;
+    fillsRef.current = [];
+  }, []);
+
   const refreshMarkets = useCallback(async () => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     try {
       const rows = (await listLiveMarkets()).filter((row) => row.executionReady !== false && (row.executionMode === "chain-pool" || Boolean(row.yesSymbol)));
       setMarkets(rows);
-      setSelectedId((current) => (current && rows.some((row) => row.id === current) ? current : (rows[0]?.id ?? null)));
+      const nextSelectedId = selectedId && rows.some((row) => row.id === selectedId) ? selectedId : (rows[0]?.id ?? null);
+      if (nextSelectedId !== selectedId) resetSimulation();
+      setSelectedId(nextSelectedId);
       setMarketStatus("ready");
       setMarketError("");
     } catch {
@@ -132,7 +142,7 @@ export default function StrategyLab() {
     } finally {
       refreshingRef.current = false;
     }
-  }, []);
+  }, [resetSimulation, selectedId]);
 
   useEffect(() => {
     const kick = setTimeout(() => void refreshMarkets(), 0);
@@ -179,10 +189,8 @@ export default function StrategyLab() {
   }, []);
 
   const selectMarket = (id: string) => {
+    if (id !== selectedId) resetSimulation();
     setSelectedId(id || null);
-    setBook(null);
-    bookRef.current = null;
-    fillsRef.current = [];
   };
 
   const canRun = Boolean(selected) && marketStatus === "ready";
@@ -230,6 +238,7 @@ export default function StrategyLab() {
                     type="button"
                     aria-pressed={active}
                     onClick={() => {
+                      if (candidate.archetype !== archetype) resetSimulation();
                       setArchetype(candidate.archetype);
                       setParams(candidate.defaults);
                     }}
