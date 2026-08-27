@@ -15,7 +15,7 @@ import AppChrome from "@/components/AppChrome";
 import { SettlementRail } from "@/components/landing/SettlementRail";
 import StrategyParamFields from "@/components/StrategyParamFields";
 import { catFor } from "@/lib/cats";
-import StrategyCopilot from "@/components/StrategyCopilot";
+import StrategyCopilotDock from "@/components/StrategyCopilotDock";
 import {
   listLiveMarkets,
   watchBook,
@@ -245,7 +245,7 @@ export default function StrategyLab() {
           </div>
         </header>
 
-        <section className="grid min-w-0 items-stretch gap-4 xl:grid-cols-[300px_minmax(0,1fr)_minmax(280px,0.9fr)]">
+        <section className="grid min-w-0 items-stretch gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
           <div className="flex min-w-0 flex-col overflow-hidden rounded-[var(--radius-shell)] border border-line bg-surface-1">
             <div className="flex items-center gap-3.5 p-4">
               <Image alt="" className="h-14 w-14 shrink-0 rounded-[12px]" height={112} src={cat.image} width={112} />
@@ -394,9 +394,6 @@ export default function StrategyLab() {
             </div>
           </div>
 
-          <div className="min-w-0 self-start xl:sticky xl:top-3">
-            <StrategyCopilot draft={{ archetype, params }} revision={revision} running={running} onApply={applyCopilotProposal} />
-          </div>
         </section>
 
         <section className="flex min-w-0 scroll-mt-4 flex-col gap-4" ref={resultsRef}>
@@ -537,6 +534,8 @@ export default function StrategyLab() {
         </section>
 
       </div>
+
+      <StrategyCopilotDock draft={{ archetype, params }} revision={revision} running={running} onApply={applyCopilotProposal} />
     </div>
   );
 }

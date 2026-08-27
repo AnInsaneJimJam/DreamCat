@@ -202,16 +202,10 @@ export default function StrategyCopilot({
   };
 
   return (
-    <aside aria-label="Strategy copilot" aria-busy={pending} className="surface-shell min-w-0">
-      <div className="surface-frame min-w-0 p-3">
-        <div className="flex items-start justify-between gap-3 border-b border-line pb-3">
-          <div className="flex min-w-0 items-start gap-2">
-            <Sparkle aria-hidden="true" className="mt-0.5 shrink-0 text-brand" size={17} weight="fill" />
-            <div className="min-w-0">
-              <p className="section-kicker">Luna / Copilot</p>
-              <h2 className="mt-1.5 text-sm font-semibold">Build the strategy with guidance</h2>
-            </div>
-          </div>
+    <aside aria-label="Strategy copilot" aria-busy={pending} className="min-w-0">
+      <div className="min-w-0">
+        <div className="flex items-center justify-between gap-3 pb-1">
+          <p className="text-xs leading-5 text-text-2">Build the strategy with guidance.</p>
           <span className="num shrink-0 text-[10px] uppercase tracking-[0.12em] text-text-3">review first</span>
         </div>
 
@@ -227,7 +221,7 @@ export default function StrategyCopilot({
 
         <div className="mt-3 flex flex-wrap gap-1.5">
           {QUICK_PROMPTS.map((prompt) => (
-            <button key={prompt} type="button" disabled={pending} onClick={() => void submit(prompt)} className="min-h-11 cursor-pointer rounded-[var(--radius-control)] border border-line px-2.5 text-[11px] text-text-2 transition-colors duration-150 hover:border-brand/50 hover:text-brand disabled:cursor-not-allowed disabled:opacity-40">
+            <button key={prompt} type="button" disabled={pending} onClick={() => void submit(prompt)} className="min-h-11 cursor-pointer rounded-[var(--radius-control)] bg-brand px-2.5 text-[11px] font-semibold text-black transition-colors duration-150 hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-40">
               {prompt}
             </button>
           ))}
@@ -246,7 +240,7 @@ export default function StrategyCopilot({
           />
           <div className="flex items-center justify-between gap-3">
             <span className="num text-[10px] text-text-3">{message.length}/2000</span>
-            <button type="submit" disabled={pending || !message.trim()} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] bg-brand px-3.5 text-xs font-semibold text-brand-ink transition-colors duration-150 hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-40">
+            <button type="submit" disabled={pending || !message.trim()} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] bg-brand px-3.5 text-xs font-semibold text-black transition-colors duration-150 hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-40">
               {pending ? <CircleNotch aria-hidden="true" className="animate-spin" size={15} /> : <Sparkle aria-hidden="true" size={15} weight="fill" />}
               {pending ? "Thinking" : "Ask copilot"}
             </button>
@@ -255,7 +249,7 @@ export default function StrategyCopilot({
 
         {error && <div role="alert" className="mt-3 flex items-start gap-2 rounded-[var(--radius-control)] border border-sell/40 bg-sell/[0.06] p-3 text-xs leading-5 text-sell"><WarningCircle aria-hidden="true" className="mt-0.5 shrink-0" size={16} weight="fill" /><span>{error}</span></div>}
         {notice && <div role="status" className="mt-3 flex items-start gap-2 rounded-[var(--radius-control)] border border-buy/30 bg-buy/[0.06] p-3 text-xs leading-5 text-buy"><Check aria-hidden="true" className="mt-0.5 shrink-0" size={16} weight="bold" /><span>{notice}</span></div>}
-        {questions.length > 0 && <div className="mt-3 rounded-[var(--radius-control)] border border-line bg-surface-1 p-3"><p className="section-kicker">Luna asks</p><div className="mt-2 space-y-1.5">{questions.map((question) => <button key={question} type="button" disabled={pending} onClick={() => void submit(question)} className="flex w-full cursor-pointer items-start gap-2 rounded-[var(--radius-control)] px-2 py-1.5 text-left text-xs leading-5 text-text-2 transition-colors duration-150 hover:bg-surface-3 hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"><ArrowRight aria-hidden="true" className="mt-1 shrink-0 text-brand" size={12} />{question}</button>)}</div></div>}
+        {questions.length > 0 && <div className="mt-3 rounded-[var(--radius-control)] border border-line bg-surface-1 p-3"><p className="section-kicker">Ms. Dream asks</p><div className="mt-2 space-y-1.5">{questions.map((question) => <button key={question} type="button" disabled={pending} onClick={() => void submit(question)} className="flex w-full cursor-pointer items-start gap-2 rounded-[var(--radius-control)] px-2 py-1.5 text-left text-xs leading-5 text-text-2 transition-colors duration-150 hover:bg-surface-3 hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"><ArrowRight aria-hidden="true" className="mt-1 shrink-0 text-brand" size={12} />{question}</button>)}</div></div>}
         {running && <p className="mt-3 text-[11px] leading-5 text-text-3">Stop the dry run before applying a copilot proposal. The assistant cannot alter an active simulation.</p>}
 
         {proposal && (() => {
@@ -295,7 +289,7 @@ export default function StrategyCopilot({
               {stale && <p className="mt-3 text-[11px] leading-4 text-sell">The draft changed while Luna was thinking. Ask again to generate a current proposal.</p>}
               <div className="mt-3 flex items-center justify-end gap-2">
                 <button type="button" onClick={() => setProposal(null)} className="min-h-11 cursor-pointer rounded-[var(--radius-control)] px-3 text-xs font-medium text-text-2 hover:bg-surface-3 hover:text-text-1">Dismiss</button>
-                <button type="button" onClick={applyProposal} disabled={running || pending || stale} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] bg-brand px-3.5 text-xs font-semibold text-brand-ink hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-40">
+                <button type="button" onClick={applyProposal} disabled={running || pending || stale} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] bg-brand px-3.5 text-xs font-semibold text-black hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-40">
                   <Check aria-hidden="true" size={15} weight="bold" />
                   Apply proposal
                 </button>
