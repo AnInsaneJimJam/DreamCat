@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:strategy-copilot": "tsx scripts/test-strategy-copilot.ts",
+    "test:strategy-copilot-route": "tsx scripts/test-strategy-copilot-route.ts"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
