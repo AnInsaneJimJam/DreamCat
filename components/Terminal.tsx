@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Address, WalletClient } from "viem";
 import { CaretDown, Wallet } from "@phosphor-icons/react";
 import { useNow } from "@/lib/use-now";
@@ -9,6 +9,7 @@ import SpotFlowPanel from "@/components/SpotFlowPanel";
 import AppChrome from "@/components/AppChrome";
 import { getExchange, listLiveMarkets, watchBook, watchFills, type BookSnapshot, type Fill, type LiveMarketRow } from "@/lib/dreamdex";
 import { placeManualTrade, type ManualTradeInput } from "@/lib/trading";
+import { cancelChainOrder } from "@/lib/market-universe/chain-execution";
 import {
   connectWalletProvider,
   discoverWalletProviders,
@@ -45,7 +46,12 @@ interface LastOrder {
   status: string;
   symbol: string;
   type: OrderType;
+  marketId: string;
+  chainContext: LiveMarketRow;
 }
+
+const CHAIN_ORDER_ID = /^\d+$/;
+const CHAIN_MARKET_ID = /^0x[0-9a-f]{64}$/i;
 
 function errorMessage(error: unknown) {
   if (error instanceof Error) return error.message.split("\n")[0].slice(0, 180);
@@ -74,8 +80,7 @@ function Ttm({ expiry, now }: { expiry: number; now: number }) {
   );
 }
 
-function PressureRibbon({ imbalance }: { imbalance: number | null }) {
-  const buyPct = imbalance == null ? 50 : Math.round(imbalance * 100);
+function PressureRibbon({ buyPct }: { buyPct: number }) {
   return (
     <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-white/[0.04]">
       <div
@@ -235,22 +240,33 @@ export default function Terminal() {
     () => markets.find((m) => m.id === selectedId) ?? null,
     [markets, selectedId]
   );
+  const selectedRef = useRef<LiveMarketRow | null>(null);
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
   const book = bookState && bookState.id === selected?.id ? bookState.book : null;
   const fills = fillsState && fillsState.id === selected?.id ? fillsState.fills : [];
   const outcomeMid = book?.mid == null ? null : outcome === "YES" ? book.mid : 1 - book.mid;
 
+  const watchId = selected?.id ?? null;
+  const watchSymbol = selected?.yesSymbol ?? "";
+  const watchMode = selected?.executionMode ?? null;
+  const watchReady = selected?.executionReady ?? null;
+
   useEffect(() => {
-    if (!selected || selected.executionReady === false) return;
-    const id = selected.id;
-    const stopBook = watchBook(selected.yesSymbol, (b) => {
+    if (watchId == null || watchReady === false) return;
+    const market = selectedRef.current;
+    if (!market || market.id !== watchId) return;
+    const id = watchId;
+    const stopBook = watchBook(market.yesSymbol, (b) => {
       if (b.bids.length || b.asks.length) setBookState({ id, book: b });
-    }, selected);
-    const stopFills = watchFills(selected.yesSymbol, (f) => setFillsState({ id, fills: f }));
+    }, market);
+    const stopFills = watchFills(market.yesSymbol, (f) => setFillsState({ id, fills: f }));
     return () => {
       stopBook();
       stopFills();
     };
-  }, [selected]);
+  }, [watchId, watchSymbol, watchMode, watchReady]);
 
   const activeWalletProvider = useMemo(
     () => walletProviders.find((entry) => entry.id === walletProviderId) ?? null,
@@ -458,6 +474,8 @@ export default function Terminal() {
         status: order.status,
         symbol: order.symbol,
         type: orderType,
+        marketId: selected.id,
+        chainContext: selected,
       });
       setAmount("");
       setTouchedFields({ amount: false, price: false, slippage: false });
@@ -478,7 +496,12 @@ export default function Terminal() {
     setOrderBusy(true);
     setOrderNotice(null);
     try {
-      const canceled = await getExchange().cancelOrder(lastOrder.id, lastOrder.symbol);
+      const isChainOrder =
+        (lastOrder.chainContext.executionMode === "chain-pool" || CHAIN_ORDER_ID.test(lastOrder.id)) &&
+        CHAIN_MARKET_ID.test(lastOrder.marketId);
+      const canceled = isChainOrder
+        ? await cancelChainOrder(walletClient, lastOrder.marketId, lastOrder.id, lastOrder.chainContext)
+        : await getExchange().cancelOrder(lastOrder.id, lastOrder.symbol);
       setLastOrder((current) => current ? { ...current, status: canceled.status } : current);
       setOrderNotice({ kind: "success", text: "Resting order canceled." });
     } catch (error) {
@@ -934,13 +957,18 @@ export default function Terminal() {
                   </div>
                 </Panel>
                 <Panel title="Order flow pressure">
-                  <div className="px-3 pb-3 pt-1">
-                    <PressureRibbon imbalance={book?.imbalance ?? null} />
-                    <div className="flex justify-between pt-1.5 text-[10px]">
-                      <span className="num text-up">buy {Math.round((book?.imbalance ?? 0.5) * 100)}%</span>
-                      <span className="num text-down">sell {Math.round((1 - (book?.imbalance ?? 0.5)) * 100)}%</span>
-                    </div>
-                  </div>
+                  {(() => {
+                    const buyPct = Math.round((book?.imbalance ?? 0.5) * 100);
+                    return (
+                      <div className="px-3 pb-3 pt-1">
+                        <PressureRibbon buyPct={buyPct} />
+                        <div className="flex justify-between pt-1.5 text-[10px]">
+                          <span className="num text-up">buy {buyPct}%</span>
+                          <span className="num text-down">sell {100 - buyPct}%</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </Panel>
                 <Panel title="YES order book">
                   <div className="pb-2">{book ? <BookLadder book={book} /> : <p className="px-3 py-2 text-xs text-muted" role="status">Waiting for depth</p>}</div>

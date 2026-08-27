@@ -26,6 +26,7 @@ import {
 import { acquireAsset, buildMarketContext } from "@/lib/market-context";
 import {
   equityCurve,
+  flattenForReconfigure,
   initialSimState,
   stepSim,
   TEMPLATES,
@@ -149,6 +150,8 @@ export default function StrategyLab() {
   }, []);
 
   const selectMarket = (id: string) => {
+    if (id === selectedId) return;
+    setSim((state) => (state.position ? flattenForReconfigure(state, bookRef.current, Date.now()) : state));
     setSelectedId(id || null);
     setBook(null);
     bookRef.current = null;
@@ -247,6 +250,8 @@ export default function StrategyLab() {
                       }`}
                       key={candidate.archetype}
                       onClick={() => {
+                        if (candidate.archetype === archetype) return;
+                        setSim((state) => (state.position ? flattenForReconfigure(state, bookRef.current, Date.now()) : state));
                         setArchetype(candidate.archetype);
                         setParams(candidate.defaults);
                       }}
