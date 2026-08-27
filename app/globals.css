@@ -11,6 +11,9 @@
   --line: rgba(218, 226, 236, 0.12);
   --line-strong: rgba(218, 226, 236, 0.22);
   --brand: #f2b84b;
+  --cream: #fbf8e8;
+  --ink: #0b0b0b;
+  --eye: #f5de3c;
   --brand-strong: #ffca63;
   --brand-ink: #0b1016;
   --buy: #3fd39a;
@@ -41,6 +44,9 @@
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
   --color-brand: var(--brand);
+  --color-cream: var(--cream);
+  --color-ink: var(--ink);
+  --color-eye: var(--eye);
   --color-brand-strong: var(--brand-strong);
   --color-brand-ink: var(--brand-ink);
   --color-buy: var(--buy);
@@ -58,6 +64,7 @@
   --font-sans: var(--font-body);
   --font-mono: var(--font-data);
   --font-display: var(--font-space);
+  --font-headline: var(--font-bricolage);
 }
 
 * {

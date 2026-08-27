@@ -22,6 +22,7 @@ import BurnerPanel from "@/components/BurnerPanel";
 import CatConfigModal from "@/components/CatConfigModal";
 import { TEMPLATES, type StrategyParams } from "@/lib/strategy";
 import { canTradeLive, isQuotingArchetype } from "@/lib/live-fleet";
+import { connectBoardSigner, publishRun, restoreBoardSigner } from "@/lib/board-client";
 import type { QuotePolicy } from "@/lib/live-quotes";
 import type { Address } from "viem";
 import { useNow } from "@/lib/use-now";
@@ -349,20 +350,17 @@ export default function FleetDeck() {
     setPublished((current) => ({ ...current, [cat.slot]: "sending" }));
     const market = markets.find((item) => item.id === cat.marketId);
     try {
-      const response = await fetch("/api/leaderboard", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          catName: cat.name,
-          archetype: cat.archetype,
-          params: cat.params,
-          pnl: Number(cat.sim.realizedPnl.toFixed(4)),
-          trades: cat.sim.trades,
-          wins: cat.sim.wins,
-          marketLabel: marketLabel(market),
-        }),
+      const signer = (await restoreBoardSigner()) ?? (await connectBoardSigner());
+      await publishRun(signer, {
+        catName: cat.name,
+        archetype: cat.archetype,
+        params: cat.params,
+        pnl: Number(cat.sim.realizedPnl.toFixed(4)),
+        trades: cat.sim.trades,
+        wins: cat.sim.wins,
+        marketLabel: marketLabel(market),
       });
-      setPublished((current) => ({ ...current, [cat.slot]: response.ok ? "done" : "fail" }));
+      setPublished((current) => ({ ...current, [cat.slot]: "done" }));
     } catch {
       setPublished((current) => ({ ...current, [cat.slot]: "fail" }));
     }

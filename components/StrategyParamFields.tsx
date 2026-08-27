@@ -113,9 +113,9 @@ function timeStopField(params: StrategyParams): FieldSpec {
     id: "time-stop",
     label: "Time stop",
     value: params.maxHoldSec,
-    min: 30,
+    min: 5,
     max: 900,
-    step: 30,
+    step: 5,
     format: (v) => `${v}s`,
     apply: (v) => ({ maxHoldSec: v }),
   };

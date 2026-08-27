@@ -215,6 +215,9 @@ export function tapeSkew(fills: Fill[], lookback: number, now: number, windowSec
   const recent: Fill[] = [];
   for (const fill of fills) {
     if (recent.length >= lookback) break;
+    // A print with no resolved side carries no directional information; counting it
+    // as a buy (the old fallback) manufactured skew out of venue metadata gaps.
+    if (fill.side == null) continue;
     if (fillTimestamp(fill) >= cutoff) recent.push(fill);
   }
   if (recent.length < MIN_TAPE_PRINTS) return 0;

@@ -8,6 +8,7 @@ export interface LeaderboardEntry {
   wins: number;
   marketLabel: string;
   publishedAt: number;
+  owner?: string;
 }
 
 const ZSET = "dreamcat:lb";
@@ -43,6 +44,31 @@ export async function publishEntry(entry: LeaderboardEntry): Promise<void> {
   const member = encodeURIComponent(JSON.stringify(entry));
   await redis(["zadd", ZSET, entry.pnl, member]);
   await redis(["zremrangebyrank", ZSET, 0, -(MAX_MEMBERS + 1)]);
+}
+
+export async function deleteEntry(id: string, owner: string): Promise<"deleted" | "not-found" | "forbidden"> {
+  const target = owner.toLowerCase();
+  if (storeMode === "local") {
+    const entry = memory.get(id);
+    if (!entry) return "not-found";
+    if ((entry.owner ?? "").toLowerCase() !== target) return "forbidden";
+    memory.delete(id);
+    return "deleted";
+  }
+  const raw = await redis<string[]>(["zrange", ZSET, 0, -1]);
+  for (const member of raw) {
+    let entry: LeaderboardEntry | null = null;
+    try {
+      entry = JSON.parse(decodeURIComponent(member)) as LeaderboardEntry;
+    } catch {
+      continue;
+    }
+    if (entry.id !== id) continue;
+    if ((entry.owner ?? "").toLowerCase() !== target) return "forbidden";
+    await redis(["zrem", ZSET, member]);
+    return "deleted";
+  }
+  return "not-found";
 }
 
 export async function topEntries(n = 20): Promise<LeaderboardEntry[]> {

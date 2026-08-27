@@ -8,6 +8,7 @@ import {
   Check,
   CircleNotch,
   Database,
+  Trash,
   Trophy,
   UsersThree,
   WarningCircle,
@@ -16,6 +17,12 @@ import AppChrome from "@/components/AppChrome";
 import { TEMPLATES } from "@/lib/strategy";
 import type { LeaderboardEntry } from "@/lib/store";
 import { useNow } from "@/lib/use-now";
+import {
+  connectBoardSigner,
+  deleteRun,
+  restoreBoardSigner,
+  type BoardSigner,
+} from "@/lib/board-client";
 
 type SortKey = "pnl" | "trades" | "winRate" | "age";
 type LoadState = "loading" | "ready" | "error";
@@ -46,6 +53,21 @@ function Panel({ children, className = "" }: { children: React.ReactNode; classN
     <section className={`surface-shell min-w-0 ${className}`}>
       <div className="surface-frame min-w-0 overflow-hidden">{children}</div>
     </section>
+  );
+}
+
+function DeleteButton({ busy, onDelete }: { busy: boolean; onDelete: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onDelete}
+      disabled={busy}
+      aria-label="Delete this run from the board"
+      className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-line-strong px-3 text-[11px] font-semibold text-text-3 transition-colors duration-150 hover:border-sell/60 hover:bg-sell/[0.08] hover:text-sell focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-50 md:min-h-9"
+    >
+      {busy ? <CircleNotch aria-hidden="true" className="animate-spin" size={14} /> : <Trash aria-hidden="true" size={14} />}
+      {busy ? "Deleting" : "Delete"}
+    </button>
   );
 }
 
@@ -129,7 +151,21 @@ export default function Leaderboard() {
   const [cloned, setCloned] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("pnl");
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [signer, setSigner] = useState<BoardSigner | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
   const now = useNow(5000);
+
+  useEffect(() => {
+    const kick = setTimeout(() => {
+      void restoreBoardSigner()
+        .then((restored) => {
+          if (restored) setSigner(restored);
+        })
+        .catch(() => undefined);
+    }, 0);
+    return () => clearTimeout(kick);
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -195,6 +231,38 @@ export default function Leaderboard() {
     setCloned(entry.id);
   }, []);
 
+  const connect = useCallback(async () => {
+    setNotice("");
+    try {
+      setSigner(await connectBoardSigner());
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "The wallet did not connect.");
+    }
+  }, []);
+
+  const removeEntry = useCallback(
+    async (entry: LeaderboardEntry) => {
+      if (!signer) return;
+      setNotice("");
+      setDeleting(entry.id);
+      try {
+        await deleteRun(signer, entry.id);
+        setEntries((current) => current.filter((row) => row.id !== entry.id));
+      } catch (caught) {
+        setNotice(caught instanceof Error ? caught.message : "The entry was not deleted.");
+      } finally {
+        setDeleting(null);
+      }
+    },
+    [signer]
+  );
+
+  const ownsEntry = useCallback(
+    (entry: LeaderboardEntry) =>
+      Boolean(signer && entry.owner && entry.owner.toLowerCase() === signer.address.toLowerCase()),
+    [signer]
+  );
+
   return (
     <div className="min-h-dvh min-w-0 overflow-x-hidden bg-canvas pb-24 md:pb-0">
       <AppChrome current="leaderboard" />
@@ -205,11 +273,32 @@ export default function Leaderboard() {
             <h1 className="mt-3 font-display text-4xl font-semibold tracking-[-0.045em] text-text-1 sm:text-5xl">Leaderboard</h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-text-2">Compare published paper-trading runs, then send a proven strategy back to your fleet.</p>
           </div>
-          <div className="flex shrink-0 items-center gap-2 text-[11px] text-text-2">
-            <Database aria-hidden="true" size={15} className="text-brand" />
-            <span>{mode === "upstash" ? "Shared registry" : "Local demo registry"}</span>
+          <div className="flex shrink-0 flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 text-[11px] text-text-2">
+              <Database aria-hidden="true" size={15} className="text-brand" />
+              <span>{mode === "upstash" ? "Shared registry" : "Local demo registry"}</span>
+            </div>
+            {signer ? (
+              <span className="num rounded-[var(--radius-control)] border border-line px-3 py-2 text-[11px] text-text-2">
+                {`${signer.address.slice(0, 6)}…${signer.address.slice(-4)}`}
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void connect()}
+                className="min-h-11 cursor-pointer rounded-[var(--radius-control)] border border-line-strong bg-surface-1 px-3.5 text-[11px] font-semibold text-text-1 transition-colors duration-150 hover:border-brand/60 hover:text-brand md:min-h-9"
+              >
+                Connect wallet to manage your runs
+              </button>
+            )}
           </div>
         </header>
+
+        {notice ? (
+          <p className="rounded-[var(--radius-control)] border border-sell/40 bg-sell/[0.06] px-4 py-3 text-[11px] leading-5 text-sell" role="alert">
+            {notice}
+          </p>
+        ) : null}
 
         <Panel>
           <div className="grid grid-cols-2 divide-x divide-line border-b border-line sm:grid-cols-4">
@@ -239,7 +328,7 @@ export default function Leaderboard() {
                   <tbody>
                     {sortedEntries.map((entry, index) => {
                       const winRate = entry.trades ? entry.wins / entry.trades : null;
-                      return <tr key={entry.id} className="h-14 border-b border-line transition-colors hover:bg-surface-1"><td className="num px-5 py-3 text-text-3">{String(index + 1).padStart(2, "0")}</td><td className="px-3 py-3"><div className="font-semibold text-text-1">{entry.catName}</div><div className="pt-0.5 text-[10px] text-text-3">{entry.archetype}</div></td><td className="max-w-[220px] truncate px-3 py-3 text-text-2">{entry.marketLabel || "Market window unavailable"}</td><td className={`num px-3 py-3 text-right font-semibold ${entry.pnl >= 0 ? "text-buy" : "text-sell"}`}>{pnlLabel(entry.pnl)}</td><td className="num px-3 py-3 text-right text-text-2">{entry.trades}</td><td className="num px-3 py-3 text-right text-text-2">{winRate == null ? "Unavailable" : fmtProb(winRate)}</td><td className="num px-3 py-3 text-right text-text-3">{ageLabel(entry.publishedAt, now)}</td><td className="px-5 py-3 text-right"><CloneButton cloned={cloned === entry.id} onClone={() => clone(entry)} /></td></tr>;
+                      return <tr key={entry.id} className="h-14 border-b border-line transition-colors hover:bg-surface-1"><td className="num px-5 py-3 text-text-3">{String(index + 1).padStart(2, "0")}</td><td className="px-3 py-3"><div className="font-semibold text-text-1">{entry.catName}</div><div className="pt-0.5 text-[10px] text-text-3">{entry.archetype}</div></td><td className="max-w-[220px] truncate px-3 py-3 text-text-2">{entry.marketLabel || "Market window unavailable"}</td><td className={`num px-3 py-3 text-right font-semibold ${entry.pnl >= 0 ? "text-buy" : "text-sell"}`}>{pnlLabel(entry.pnl)}</td><td className="num px-3 py-3 text-right text-text-2">{entry.trades}</td><td className="num px-3 py-3 text-right text-text-2">{winRate == null ? "Unavailable" : fmtProb(winRate)}</td><td className="num px-3 py-3 text-right text-text-3">{ageLabel(entry.publishedAt, now)}</td><td className="px-5 py-3"><div className="flex items-center justify-end gap-2"><CloneButton cloned={cloned === entry.id} onClone={() => clone(entry)} />{ownsEntry(entry) ? <DeleteButton busy={deleting === entry.id} onDelete={() => void removeEntry(entry)} /> : null}</div></td></tr>;
                     })}
                   </tbody>
                 </table>
@@ -247,13 +336,13 @@ export default function Leaderboard() {
               <div className="divide-y divide-line md:hidden" aria-label="Published strategy leaderboard cards">
                 {sortedEntries.map((entry, index) => {
                   const winRate = entry.trades ? entry.wins / entry.trades : null;
-                  return <article key={entry.id} className="min-w-0 px-4 py-4 sm:px-5"><div className="flex min-w-0 items-start justify-between gap-3"><div className="flex min-w-0 items-start gap-3"><span className="num pt-0.5 text-[11px] text-text-3">{String(index + 1).padStart(2, "0")}</span><div className="min-w-0"><h2 className="truncate text-sm font-semibold text-text-1">{entry.catName}</h2><div className="flex flex-wrap gap-x-2 gap-y-1 pt-1 text-[10px]"><EntryMeta entry={entry} now={now} /></div></div></div><CloneButton cloned={cloned === entry.id} onClone={() => clone(entry)} /></div><dl className="mt-4 grid grid-cols-3 gap-3 border-t border-line pt-3 text-[10px]"><div><dt className="text-text-3">PnL</dt><dd className={`num pt-1 font-semibold ${entry.pnl >= 0 ? "text-buy" : "text-sell"}`}>{pnlLabel(entry.pnl)}</dd></div><div><dt className="text-text-3">Trades</dt><dd className="num pt-1 text-text-1">{entry.trades}</dd></div><div><dt className="text-text-3">Win rate</dt><dd className="num pt-1 text-text-1">{winRate == null ? "Unavailable" : fmtProb(winRate)}</dd></div></dl></article>;
+                  return <article key={entry.id} className="min-w-0 px-4 py-4 sm:px-5"><div className="flex min-w-0 items-start justify-between gap-3"><div className="flex min-w-0 items-start gap-3"><span className="num pt-0.5 text-[11px] text-text-3">{String(index + 1).padStart(2, "0")}</span><div className="min-w-0"><h2 className="truncate text-sm font-semibold text-text-1">{entry.catName}</h2><div className="flex flex-wrap gap-x-2 gap-y-1 pt-1 text-[10px]"><EntryMeta entry={entry} now={now} /></div></div></div><div className="flex shrink-0 flex-col items-end gap-2"><CloneButton cloned={cloned === entry.id} onClone={() => clone(entry)} />{ownsEntry(entry) ? <DeleteButton busy={deleting === entry.id} onDelete={() => void removeEntry(entry)} /> : null}</div></div><dl className="mt-4 grid grid-cols-3 gap-3 border-t border-line pt-3 text-[10px]"><div><dt className="text-text-3">PnL</dt><dd className={`num pt-1 font-semibold ${entry.pnl >= 0 ? "text-buy" : "text-sell"}`}>{pnlLabel(entry.pnl)}</dd></div><div><dt className="text-text-3">Trades</dt><dd className="num pt-1 text-text-1">{entry.trades}</dd></div><div><dt className="text-text-3">Win rate</dt><dd className="num pt-1 text-text-1">{winRate == null ? "Unavailable" : fmtProb(winRate)}</dd></div></dl></article>;
                 })}
               </div>
             </>
           )}
         </Panel>
-        <p className="px-1 text-[11px] leading-5 text-text-3">Clone writes the strategy config into Fleet Deck. Review the target market and capital allocation before deploying.</p>
+        <p className="px-1 text-[11px] leading-5 text-text-3">Clone writes the strategy config into Fleet Deck. Review the target market and capital allocation before deploying. Delete removes a run you published, and only the wallet that published it can sign that request.</p>
       </main>
     </div>
   );

@@ -129,12 +129,27 @@ assert(crossed.position?.side === "NO", "a book that trades up through the resti
 const nearExpiry = stepSim(marketmaker, hit, bookAt(0.45, 0.55), [], mmNow + 3000, { ...mmCtx, expiry: mmNow + 5000 });
 assert(nearExpiry.position === null && nearExpiry.log[0]?.detail.includes("flatten"), "the maker crosses out to flatten into expiry");
 
-assert(resolveFillSide({ info: { takerIsBid: true, makerSide: "SELL_YES" } }) === "buy", "a bid taker is a buy");
-assert(resolveFillSide({ info: { takerIsBid: false, makerSide: "BUY_YES" } }) === "sell", "an ask taker is a sell");
-assert(resolveFillSide({ info: { makerSide: "SELL_YES" } }) === "buy", "makerSide SELL_YES means the taker bought");
+// The SDK resolves a binary fill through the outcome lens before we ever see it,
+// so its own `side` outranks the book-relative raw fields underneath.
+assert(
+  resolveFillSide({ side: "sell", info: { takerIsBid: true, makerSide: "SELL_YES" } }) === "sell",
+  "the SDK-resolved side wins over raw book-relative info"
+);
+assert(resolveFillSide({ side: "buy" }) === "buy", "an explicit buy is taken as-is");
+
+// SELL_YES and SELL_NO are OPPOSITE trades; the old "SELL" prefix test collapsed them.
+assert(resolveFillSide({ info: { takerSide: "BUY_YES" } }) === "buy", "takerSide BUY_YES is a buy");
+assert(resolveFillSide({ info: { takerSide: "SELL_NO" } }) === "buy", "takerSide SELL_NO is a buy");
+assert(resolveFillSide({ info: { takerSide: "SELL_YES" } }) === "sell", "takerSide SELL_YES is a sell");
+assert(resolveFillSide({ info: { takerSide: "BUY_NO" } }) === "sell", "takerSide BUY_NO is a sell");
+
+assert(resolveFillSide({ info: { makerSide: "SELL_YES" } }) === "buy", "makerSide SELL_YES means the taker bought YES");
+assert(resolveFillSide({ info: { makerSide: "SELL_NO" } }) === "sell", "makerSide SELL_NO is the OPPOSITE of SELL_YES");
 assert(resolveFillSide({ info: { makerSide: "BUY_YES" } }) === "sell", "makerSide BUY_YES means the taker sold");
-assert(resolveFillSide({ side: "sell" }) === "sell", "an explicit side still wins when no info is present");
-assert(resolveFillSide({}) === "buy", "a trade with no side information falls back to buy");
+assert(resolveFillSide({ info: { makerSide: "BUY_NO" } }) === "buy", "makerSide BUY_NO means the taker bought");
+
+assert(resolveFillSide({ info: { takerIsBid: true } }) === "buy", "takerIsBid is the last resort");
+assert(resolveFillSide({}) === null, "a trade with no usable side information is unclassifiable");
 
 const tapeNow = Date.UTC(2026, 7, 26, 11, 0, 0);
 const print = (side: "buy" | "sell", ageSec: number): Fill => ({ price: 0.5, qty: 1, side, ts: tapeNow - ageSec * 1000 });
@@ -146,6 +161,26 @@ assert(tapeSkew([print("buy", 5), print("buy", 6), print("sell", 7), print("sell
 assert(
   stepSim(momentum, initialSimState, book, freshBuys.map((f) => ({ ...f, ts: tapeNow - 7200_000 })), tapeNow).position === null,
   "momentum does not fire on a stale tape"
+);
+
+// Regression: unsided prints used to default to "buy", manufacturing skew out of
+// venue metadata gaps and firing momentum on a tape that said nothing at all.
+const unsided = (ageSec: number): Fill => ({ price: 0.5, qty: 1, side: null, ts: tapeNow - ageSec * 1000 });
+assert(
+  tapeSkew([unsided(5), unsided(6), unsided(7), unsided(8)], 6, tapeNow, DEFAULT_TAPE_WINDOW_SEC) === 0,
+  "a tape of unsided prints carries no skew"
+);
+assert(
+  tapeSkew([print("buy", 5), unsided(6), unsided(7), print("sell", 8)], 6, tapeNow, DEFAULT_TAPE_WINDOW_SEC) === 0,
+  "unsided prints are skipped rather than counted as buys"
+);
+assert(
+  stepSim(momentum, initialSimState, book, [unsided(5), unsided(6), unsided(7), unsided(8)], tapeNow).position === null,
+  "momentum does not fire on an unsided tape"
+);
+assert(
+  stepSim(momentum, initialSimState, book, freshBuys, tapeNow).position?.side === "YES",
+  "momentum still fires on a genuinely buy-skewed tape"
 );
 
 const asRow = (partial: Partial<LiveMarketRow>) => partial as LiveMarketRow;

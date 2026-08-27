@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans, JetBrains_Mono, Space_Grotesk } from "next/font/google";
+import { Bricolage_Grotesque, IBM_Plex_Sans, JetBrains_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 
 const plexSans = IBM_Plex_Sans({
@@ -10,6 +10,12 @@ const plexSans = IBM_Plex_Sans({
 const jbMono = JetBrains_Mono({
   variable: "--font-data",
   subsets: ["latin"],
+});
+
+const bricolage = Bricolage_Grotesque({
+  variable: "--font-bricolage",
+  subsets: ["latin"],
+  axes: ["opsz", "wdth"],
 });
 
 const spaceGrotesk = Space_Grotesk({
@@ -30,7 +36,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${plexSans.variable} ${jbMono.variable} ${spaceGrotesk.variable} h-full antialiased`}
+      className={`${plexSans.variable} ${jbMono.variable} ${spaceGrotesk.variable} ${bricolage.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground font-sans">
         <a href="#main-content" className="skip-link">

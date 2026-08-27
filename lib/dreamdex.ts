@@ -171,19 +171,40 @@ export async function fetchBook(yesSymbol: string): Promise<BookSnapshot> {
 export interface Fill {
   price: number;
   qty: number;
-  side: "buy" | "sell";
+  /** null when the venue gave no usable side; such prints are skipped by tape signals. */
+  side: "buy" | "sell" | null;
   ts: number;
 }
 
-export function resolveFillSide(trade: unknown): "buy" | "sell" {
-  const row = trade as { side?: unknown; info?: { takerIsBid?: unknown; makerSide?: unknown } };
-  const takerIsBid = row.info?.takerIsBid;
-  if (typeof takerIsBid === "boolean") return takerIsBid ? "buy" : "sell";
+const TAKER_BUY_SIDES = new Set(["BUY_YES", "SELL_NO"]);
+const MAKER_BUY_SIDES = new Set(["SELL_YES", "BUY_NO"]);
+
+/**
+ * The SDK already resolves a binary fill through the outcome lens (sideView maps
+ * BUY_YES/SELL_NO to "buy" and inverts for the NO tradable), so its own `side` is
+ * authoritative and must be read FIRST. The raw `info` fields are book-relative:
+ * on a binary pool `takerIsBid` is undefined or describes book direction rather
+ * than outcome, and `makerSide` cannot be classified by a "SELL" prefix because
+ * SELL_YES (taker bought YES) and SELL_NO (taker bought NO) are opposite trades.
+ */
+export function resolveFillSide(trade: unknown): "buy" | "sell" | null {
+  const row = trade as {
+    side?: unknown;
+    info?: { takerSide?: unknown; makerSide?: unknown; takerIsBid?: unknown };
+  };
+  if (row.side === "buy" || row.side === "sell") return row.side;
+
+  const takerSide = row.info?.takerSide;
+  if (typeof takerSide === "string" && takerSide.length) {
+    return TAKER_BUY_SIDES.has(takerSide.toUpperCase()) ? "buy" : "sell";
+  }
   const makerSide = row.info?.makerSide;
   if (typeof makerSide === "string" && makerSide.length) {
-    return makerSide.toUpperCase().startsWith("SELL") ? "buy" : "sell";
+    return MAKER_BUY_SIDES.has(makerSide.toUpperCase()) ? "buy" : "sell";
   }
-  return typeof row.side === "string" && row.side.toLowerCase() === "sell" ? "sell" : "buy";
+  const takerIsBid = row.info?.takerIsBid;
+  if (typeof takerIsBid === "boolean") return takerIsBid ? "buy" : "sell";
+  return null;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

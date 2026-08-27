@@ -1,32 +1,58 @@
 type BrandMarkProps = {
   size?: number;
   className?: string;
+  plate?: boolean;
 };
 
-export function BrandMark({ size = 24, className = "" }: BrandMarkProps) {
+export function BrandMark({ size = 24, className = "", plate = true }: BrandMarkProps) {
+  const radius = plate ? 116 : 0;
   return (
     <svg
       aria-hidden="true"
-      className={`text-brand ${className}`}
-      fill="none"
+      className={className}
       height={size}
-      viewBox="0 0 24 24"
+      role="presentation"
+      viewBox="0 0 512 512"
       width={size}
+      xmlns="http://www.w3.org/2000/svg"
     >
-      <path
-        d="M4 11c0-4 3.6-7 8-7s8 3 8 7l-1.5 6.5c-.3 1.2-1.2 2-2.4 2H7.9c-1.2 0-2.1-.8-2.4-2L4 11Z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M7 5.5 8.5 9M17 5.5 15.5 9"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="1.5"
-      />
-      <circle cx="9.5" cy="12.5" fill="currentColor" r="1" />
-      <circle cx="14.5" cy="12.5" fill="currentColor" r="1" />
-      <path d="M10.5 15.5h3" stroke="currentColor" strokeLinecap="round" strokeWidth="1.2" />
+      {plate ? <rect fill="var(--cream)" height="512" rx={radius} width="512" /> : null}
+      <g transform="translate(256 262) scale(0.86) translate(-256 -256)">
+        <g fill="none" stroke="var(--ink)" strokeLinecap="round" strokeWidth="9">
+          <path d="M170 232C140 224 118 222 100 226" />
+          <path d="M168 252C142 256 124 266 110 280" />
+          <path d="M342 232C372 224 394 222 412 226" />
+          <path d="M344 252C370 256 388 266 402 280" />
+        </g>
+        <g fill="var(--ink)">
+          <path d="M150 176C138 120 140 78 148 62C156 46 176 58 196 78C214 96 228 116 236 132Z" />
+          <path d="M362 176C374 120 372 78 364 62C356 46 336 58 316 78C298 96 284 116 276 132Z" />
+          <ellipse cx="256" cy="196" rx="108" ry="98" />
+          <path d="M256 214C330 214 372 268 380 340C388 412 342 448 256 448C170 448 124 412 132 340C140 268 182 214 256 214Z" />
+          <path
+            d="M186 360C150 336 116 340 104 368C92 396 108 428 136 436C156 442 172 434 178 420C184 406 176 394 162 392C150 390 142 398 144 408"
+            fill="none"
+            stroke="var(--ink)"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="34"
+          />
+        </g>
+        <g fill="var(--eye)">
+          <ellipse cx="212" cy="196" rx="26" ry="32" />
+          <ellipse cx="300" cy="196" rx="26" ry="32" />
+        </g>
+        <g fill="var(--ink)">
+          <ellipse cx="219" cy="196" rx="10" ry="24" />
+          <ellipse cx="307" cy="196" rx="10" ry="24" />
+        </g>
+        <path d="M256 242L245 253C245 262 254 266 256 259C258 266 267 262 267 253Z" fill="var(--cream)" />
+        <g fill="none" stroke="var(--cream)" strokeLinecap="round" strokeWidth="7">
+          <path d="M243 268C243 280 253 284 256 274C259 284 269 280 269 268" />
+          <path d="M300 448C300 400 312 372 340 356" />
+          <path d="M258 448C252 414 258 392 272 378" />
+        </g>
+      </g>
     </svg>
   );
 }
