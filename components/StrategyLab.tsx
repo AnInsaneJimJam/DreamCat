@@ -15,6 +15,7 @@ import AppChrome from "@/components/AppChrome";
 import { SettlementRail } from "@/components/landing/SettlementRail";
 import StrategyParamFields from "@/components/StrategyParamFields";
 import { catFor } from "@/lib/cats";
+import StrategyCopilot from "@/components/StrategyCopilot";
 import {
   listLiveMarkets,
   watchBook,
@@ -34,6 +35,7 @@ import {
   type SimState,
   type StrategyParams,
 } from "@/lib/strategy";
+import { applyStrategyCopilotProposal as mergeStrategyCopilotProposal, type StrategyCopilotResponse } from "@/lib/strategy-copilot";
 import { useNow } from "@/lib/use-now";
 
 const fmtProb = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -52,6 +54,7 @@ export default function StrategyLab() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [archetype, setArchetype] = useState<Archetype>("momentum");
   const [params, setParams] = useState<StrategyParams>(TEMPLATES[1].defaults);
+  const [revision, setRevision] = useState(0);
   const [running, setRunning] = useState(false);
   const [sim, setSim] = useState<SimState>(initialSimState);
   const [book, setBook] = useState<BookSnapshot | null>(null);
@@ -68,6 +71,19 @@ export default function StrategyLab() {
 
   const template = useMemo(() => TEMPLATES.find((t) => t.archetype === archetype)!, [archetype]);
   const cat = catFor(archetype);
+
+  const updateParams = useCallback((next: StrategyParams) => {
+    setParams(next);
+    setRevision((current) => current + 1);
+  }, []);
+
+  const selectArchetype = useCallback((nextArchetype: Archetype, nextParams: StrategyParams) => {
+    if (nextArchetype === archetype) return;
+    setSim((state) => (state.position ? flattenForReconfigure(state, bookRef.current, Date.now()) : state));
+    setArchetype(nextArchetype);
+    setParams(nextParams);
+    setRevision((current) => current + 1);
+  }, [archetype]);
 
   const refreshMarkets = useCallback(async () => {
     if (refreshingRef.current) return;
@@ -149,6 +165,22 @@ export default function StrategyLab() {
     setSim(initialSimState);
   }, []);
 
+  const resetRehearsal = useCallback(() => {
+    setSim(initialSimState);
+    setBook(null);
+    bookRef.current = null;
+    fillsRef.current = [];
+  }, []);
+
+  const applyCopilotProposal = useCallback((response: StrategyCopilotResponse, proposalRevision: number) => {
+    if (running || proposalRevision !== revision) return;
+    const next = mergeStrategyCopilotProposal({ archetype, params }, response);
+    resetRehearsal();
+    setArchetype(next.archetype);
+    setParams(next.params);
+    setRevision((current) => current + 1);
+  }, [archetype, params, resetRehearsal, revision, running]);
+
   const selectMarket = (id: string) => {
     if (id === selectedId) return;
     setSim((state) => (state.position ? flattenForReconfigure(state, bookRef.current, Date.now()) : state));
@@ -213,7 +245,7 @@ export default function StrategyLab() {
           </div>
         </header>
 
-        <section className="grid min-w-0 items-stretch gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
+        <section className="grid min-w-0 items-stretch gap-4 xl:grid-cols-[300px_minmax(0,1fr)_minmax(280px,0.9fr)]">
           <div className="flex min-w-0 flex-col overflow-hidden rounded-[var(--radius-shell)] border border-line bg-surface-1">
             <div className="flex items-center gap-3.5 p-4">
               <Image alt="" className="h-14 w-14 shrink-0 rounded-[12px]" height={112} src={cat.image} width={112} />
@@ -249,12 +281,7 @@ export default function StrategyLab() {
                         active ? "border-brand bg-brand/[0.08]" : "border-transparent hover:border-line-strong hover:bg-surface-2"
                       }`}
                       key={candidate.archetype}
-                      onClick={() => {
-                        if (candidate.archetype === archetype) return;
-                        setSim((state) => (state.position ? flattenForReconfigure(state, bookRef.current, Date.now()) : state));
-                        setArchetype(candidate.archetype);
-                        setParams(candidate.defaults);
-                      }}
+                      onClick={() => selectArchetype(candidate.archetype, candidate.defaults)}
                       type="button"
                     >
                       <Image
@@ -355,16 +382,20 @@ export default function StrategyLab() {
                 </p>
                 <button
                   className="num shrink-0 cursor-pointer text-[10px] uppercase tracking-[0.14em] text-text-3 transition-colors duration-150 hover:text-brand"
-                  onClick={() => setParams(template.defaults)}
+                  onClick={() => updateParams(template.defaults)}
                   type="button"
                 >
                   Reset to defaults
                 </button>
               </div>
               <div className="grid flex-1 auto-rows-min content-start gap-x-8 gap-y-4 sm:grid-cols-2 xl:grid-cols-3 [&>*:last-child]:sm:col-span-full">
-                <StrategyParamFields archetype={archetype} onChange={setParams} params={params} />
+                <StrategyParamFields archetype={archetype} onChange={updateParams} params={params} />
               </div>
             </div>
+          </div>
+
+          <div className="min-w-0 self-start xl:sticky xl:top-3">
+            <StrategyCopilot draft={{ archetype, params }} revision={revision} running={running} onApply={applyCopilotProposal} />
           </div>
         </section>
 
