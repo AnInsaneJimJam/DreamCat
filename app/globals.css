@@ -201,6 +201,168 @@ summary:focus-visible {
   }
 }
 
+.hero-study-morph {
+  transition:
+    d 2.2s cubic-bezier(0.32, 0.72, 0, 1),
+    y 2.2s cubic-bezier(0.32, 0.72, 0, 1),
+    height 2.2s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.hero-cat-head {
+  animation: cat-tilt 5s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center bottom;
+}
+
+.hero-cat-tail {
+  animation: cat-tail 3.6s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: bottom left;
+}
+
+.hero-cat-ear {
+  animation: cat-ear 4.4s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: bottom center;
+}
+
+.hero-cat-eye {
+  animation: cat-blink 4.6s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.hero-cat-walk {
+  animation: cat-walk 13s linear infinite;
+}
+
+.hero-cat-legs {
+  animation: cat-step 0.5s steps(2) infinite;
+  transform-box: fill-box;
+  transform-origin: center top;
+}
+
+@keyframes cat-tilt {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  40%,
+  60% {
+    transform: rotate(var(--tilt, 6deg));
+  }
+}
+
+@keyframes cat-tail {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(-13deg);
+  }
+}
+
+@keyframes cat-ear {
+  0%,
+  86%,
+  100% {
+    transform: rotate(0deg);
+  }
+  90% {
+    transform: rotate(-9deg);
+  }
+}
+
+@keyframes cat-blink {
+  0%,
+  91%,
+  100% {
+    transform: scaleY(1);
+  }
+  95% {
+    transform: scaleY(0.12);
+  }
+}
+
+@keyframes cat-walk {
+  0% {
+    transform: translateX(12px) scaleX(1);
+  }
+  44% {
+    transform: translateX(120px) scaleX(1);
+  }
+  50% {
+    transform: translateX(120px) scaleX(-1);
+  }
+  94% {
+    transform: translateX(12px) scaleX(-1);
+  }
+  100% {
+    transform: translateX(12px) scaleX(1);
+  }
+}
+
+@keyframes cat-step {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(-0.8px);
+  }
+}
+
+.hero-study-scan {
+  animation: study-scan 5.5s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+.hero-study-bob {
+  animation: study-bob 3.6s ease-in-out infinite;
+}
+
+.hero-study-think {
+  animation: study-think 2.4s ease-in-out infinite;
+}
+
+@keyframes study-scan {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(100px);
+    opacity: 0;
+  }
+}
+
+@keyframes study-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes study-think {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(1px);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-1px);
+  }
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

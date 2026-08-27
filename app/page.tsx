@@ -3,7 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import AppChrome from "@/components/AppChrome";
 import { BrandMark } from "@/components/BrandMark";
-import HeroContract from "@/components/landing/HeroContract";
+import { HeroStudy } from "@/components/landing/HeroStudy";
 import LandingTicker from "@/components/landing/LandingTicker";
 import { Reveal } from "@/components/landing/Reveal";
 import { CAT_IDENTITIES } from "@/lib/cats";
@@ -103,8 +103,8 @@ export default function Landing() {
       <div className="signal-field pointer-events-none fixed inset-0 z-0" aria-hidden="true" />
       <AppChrome current="home" />
       <main className="relative z-10">
-        <section className="mx-auto grid max-w-[1440px] grid-cols-1 items-center gap-14 px-4 pb-16 pt-16 sm:px-6 lg:grid-cols-[1.02fr_0.98fr] lg:gap-20 lg:px-8 lg:pb-24 lg:pt-24">
-          <div className="max-w-[620px]">
+        <section className="mx-auto grid max-w-[1440px] grid-cols-1 items-center gap-14 px-4 pb-16 pt-16 sm:px-6 lg:grid-cols-[1fr_1fr] lg:gap-8 lg:px-8 lg:pb-24 lg:pt-24">
+          <div className="max-w-[620px] lg:ml-5">
             <Reveal>
               <p className="section-kicker">Binary event contracts · Somnia Shannon</p>
             </Reveal>
@@ -147,8 +147,10 @@ export default function Landing() {
               </div>
             </Reveal>
           </div>
-          <Reveal delay={120}>
-            <HeroContract />
+          <Reveal className="min-w-0" delay={120}>
+            <div className="w-full lg:-ml-3">
+              <HeroStudy />
+            </div>
           </Reveal>
         </section>
 
