@@ -569,12 +569,273 @@ export default function Terminal() {
       </div>
 
       <main className="flex min-w-0 max-w-full flex-1 flex-col gap-3 overflow-x-hidden p-3">
-        <div className="grid min-w-0 items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="grid min-w-0 items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_360px]">
           <PriceChart asset={chartAsset} onAssetChange={setChartAsset} />
-          <SpotFlowPanel asset={chartAsset} />
+          {selected ? (
+            <Panel title="Manual order">
+              <form onSubmit={submitOrder} className="space-y-3 px-3 pb-3" aria-label="Manual order ticket">
+                <div className="rounded-md border border-hairline bg-background/70 px-2.5 py-2">
+                  <div className="flex items-center justify-between text-[10px] text-muted">
+                    <span className="num font-medium text-amber">{selected.asset} / {selected.interval}</span>
+                    <span className="num"><Ttm expiry={selected.expiry} now={now} /></span>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-foreground/90">{selected.question}</p>
+                  <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted">
+                    <span>{selected.windowLabel}</span>
+                    <span className="num">YES {book?.mid != null ? fmtProb(book.mid) : "Unavailable"}</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-1 rounded-md border border-hairline bg-background p-0.5" role="group" aria-label="Order side">
+                  {(["buy", "sell"] as const).map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={orderSide === value}
+                      onClick={() => setOrderSide(value)}
+                      className={`min-h-11 rounded-[4px] px-2 text-xs font-semibold capitalize ease-terminal transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2 md:min-h-9 ${
+                        orderSide === value
+                          ? value === "buy"
+                            ? "bg-up text-background shadow-[0_0_18px_rgba(34,197,94,0.12)]"
+                            : "bg-down text-foreground shadow-[0_0_18px_rgba(239,68,68,0.12)]"
+                          : "text-muted hover:bg-white/[0.05] hover:text-foreground"
+                      }`}
+                    >
+                      {value === "buy" ? "Buy" : "Sell"}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-1.5" role="group" aria-label="Outcome">
+                  <span className="mr-1 text-[10px] text-muted">Contract</span>
+                  {(["YES", "NO"] as const).map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={outcome === value}
+                      onClick={() => setOutcome(value)}
+                      className={`min-h-11 rounded-md border px-3 py-1.5 text-[11px] font-medium ease-terminal transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2 md:min-h-9 ${
+                        outcome === value
+                          ? value === "YES"
+                            ? "border-up/50 bg-up/[0.12] text-up"
+                            : "border-down/50 bg-down/[0.12] text-down"
+                          : "border-hairline text-muted hover:bg-white/[0.04] hover:text-foreground"
+                      }`}
+                    >
+                      {value}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between border-b border-hairline pb-1" role="group" aria-label="Order type">
+                  <div className="flex items-center gap-4">
+                    {(["limit", "market"] as const).map((value) => (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-pressed={orderType === value}
+                        onClick={() => setOrderType(value)}
+                        className={`relative min-h-11 py-1 text-[11px] capitalize ease-terminal transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2 md:min-h-9 ${
+                          orderType === value
+                            ? "font-medium text-foreground after:absolute after:inset-x-0 after:-bottom-[5px] after:h-0.5 after:bg-amber"
+                            : "text-muted hover:text-foreground"
+                        }`}
+                      >
+                        {value}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="text-[10px] text-muted">Live book</span>
+                </div>
+                <div>
+                  <label htmlFor="order-amount" className="mb-1.5 flex items-center justify-between text-[11px] text-muted">
+                    <span>Amount</span>
+                    <span className="text-[10px]">contracts</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="order-amount"
+                      name="amount"
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="any"
+                      value={amount}
+                      onChange={(event) => {
+                        setTouchedFields((current) => ({ ...current, amount: true }));
+                        setAmount(event.target.value);
+                      }}
+                      placeholder="0.00"
+                      aria-describedby="order-amount-help"
+                      aria-invalid={Boolean((touchedFields.amount || orderAttempted) && amountInvalid)}
+                      className="num w-full rounded-md border border-hairline bg-background px-3 py-2.5 pr-20 text-sm text-foreground placeholder:text-muted/50 focus:border-amber/60 focus:outline-none focus:ring-1 focus:ring-amber/40"
+                    />
+                    <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[10px] text-muted">contracts</span>
+                  </div>
+                  <p id="order-amount-help" className="mt-1 text-[10px] text-muted">Venue lot size is checked before signing.</p>
+                </div>
+                {orderType === "limit" ? (
+                  <div>
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <label htmlFor="order-price" className="text-[11px] text-muted">Limit price</label>
+                      <button
+                        type="button"
+                        onClick={() => outcomeMid != null && setPrice((outcomeMid * 100).toFixed(2))}
+                        disabled={outcomeMid == null}
+                        className="min-h-11 rounded border border-hairline px-2 py-1 text-[10px] text-muted hover:bg-white/[0.04] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2 md:min-h-9"
+                      >
+                        Mid {outcomeMid != null ? fmtProb(outcomeMid) : "Unavailable"}
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <input
+                        id="order-price"
+                        name="price"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={price}
+                        onChange={(event) => {
+                          setTouchedFields((current) => ({ ...current, price: true }));
+                          setPrice(event.target.value);
+                        }}
+                        placeholder="50.00"
+                        aria-describedby="order-price-help"
+                        aria-invalid={Boolean((touchedFields.price || orderAttempted) && priceInvalid)}
+                        className="num w-full rounded-md border border-hairline bg-background px-3 py-2.5 pr-24 text-sm text-foreground placeholder:text-muted/50 focus:border-amber/60 focus:outline-none focus:ring-1 focus:ring-amber/40"
+                      />
+                      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[10px] text-muted">%</span>
+                    </div>
+                    <p id="order-price-help" className="mt-1 text-[10px] text-muted">Probability from 0% to 100%.</p>
+                  </div>
+                ) : (
+                  <details className="rounded-md border border-hairline/70 bg-background/40 group">
+                    <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-2.5 py-2 text-[11px] text-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2 md:min-h-9">
+                      <span>Advanced</span>
+                      <CaretDown size={14} weight="regular" aria-hidden="true" className="transition-transform group-open:rotate-180" />
+                    </summary>
+                    <div className="border-t border-hairline px-2.5 pb-2.5 pt-2">
+                      <label htmlFor="order-slippage" className="mb-1.5 flex items-center justify-between text-[11px] text-muted">
+                        <span>Max slippage</span>
+                        <span className="text-[10px]">percent</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          id="order-slippage"
+                          name="slippage"
+                          type="number"
+                          inputMode="decimal"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          value={slippage}
+                          onChange={(event) => {
+                            setTouchedFields((current) => ({ ...current, slippage: true }));
+                            setSlippage(event.target.value);
+                          }}
+                          aria-describedby="order-slippage-help"
+                          aria-invalid={Boolean((touchedFields.slippage || orderAttempted) && slippageInvalid)}
+                          className="num w-full rounded-md border border-hairline bg-background px-3 py-2.5 pr-10 text-sm text-foreground placeholder:text-muted/50 focus:border-amber/60 focus:outline-none focus:ring-1 focus:ring-amber/40"
+                        />
+                        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[10px] text-muted">%</span>
+                      </div>
+                      <p id="order-slippage-help" className="mt-1 text-[10px] text-muted">Market orders cross the opposing book.</p>
+                    </div>
+                  </details>
+                )}
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-1 border-t border-hairline pt-2 text-[11px]">
+                  <dt className="text-muted">Available</dt>
+                  <dd className="num text-right">Unavailable</dd>
+                  <dt className="text-muted">Position</dt>
+                  <dd className="num text-right">Unavailable</dd>
+                  <dt className="text-muted">Order size</dt>
+                  <dd className="num text-right">{amount && Number.isFinite(Number(amount)) ? fmtCompact(Number(amount)) : "Unavailable"}</dd>
+                  <dt className="text-muted">Order value</dt>
+                  <dd className="num text-right">{orderValue != null ? fmtCompact(orderValue) : "Unavailable"}</dd>
+                  <dt className="text-muted">Est. price</dt>
+                  <dd className="num text-right">{estimatedPrice != null ? fmtProb(estimatedPrice) : "Unavailable"}</dd>
+                  <dt className="text-muted">Slippage</dt>
+                  <dd className="num text-right">{orderType === "market" && slippage.trim() ? `${slippage}%` : "Unavailable"}</dd>
+                  <dt className="text-muted">Fees</dt>
+                  <dd className="num text-right">Unavailable</dd>
+                </dl>
+                {walletError && <p role="alert" className="text-[11px] text-down">{walletError}</p>}
+                <p aria-live="polite" className={`text-[11px] ${showFormError ? "text-down" : "text-muted"}`}>
+                  {showFormError ? formError : walletAddress ? "Review the order before signing." : "Connect a Somnia Shannon wallet to sign."}
+                </p>
+                {walletAddress && !wrongNetwork && (
+                  <p className="flex items-center justify-between text-[11px] text-muted">
+                    <span>Signing as</span>
+                    <span className="num text-foreground">{shortAddress(walletAddress)}</span>
+                  </p>
+                )}
+                {orderNotice && (
+                  <p role={orderNotice.kind === "error" ? "alert" : "status"} className={`text-[11px] ${orderNotice.kind === "error" ? "text-down" : "text-up"}`}>
+                    {orderNotice.text}
+                  </p>
+                )}
+                {!walletAddress ? (
+                  <button
+                    type="button"
+                    onClick={connectWallet}
+                    disabled={walletBusy}
+                    className="min-h-11 w-full rounded-md bg-foreground px-3 py-2.5 text-xs font-semibold text-background ease-terminal transition-[opacity,transform] hover:opacity-90 active:translate-y-px disabled:cursor-wait disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2"
+                  >
+                    {walletBusy ? "Connecting" : "Connect wallet"}
+                  </button>
+                ) : wrongNetwork ? (
+                  <button
+                    type="button"
+                    onClick={switchNetwork}
+                    disabled={walletBusy}
+                    className="min-h-11 w-full rounded-md bg-amber px-3 py-2.5 text-xs font-semibold text-background ease-terminal transition-[opacity,transform] hover:opacity-90 active:translate-y-px disabled:cursor-wait disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2"
+                  >
+                    {walletBusy ? "Switching network" : "Switch to Somnia Shannon"}
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={Boolean(formError) || orderBusy || !walletClient}
+                    aria-busy={orderBusy}
+                    className={`min-h-11 w-full rounded-md px-3 py-2.5 text-xs font-semibold text-background ease-terminal transition-[opacity,transform] hover:opacity-90 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2 ${orderSide === "buy" ? "bg-up" : "bg-down"}`}
+                  >
+                    {orderBusy ? "Signing" : `${orderSide === "buy" ? "Buy" : "Sell"} ${outcome}`}
+                  </button>
+                )}
+                {lastOrder && (
+                  <div className="border-t border-hairline pt-2 text-[11px]" aria-live="polite">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted">Last order</span>
+                      <span className={lastOrder.status === "open" ? "text-amber" : lastOrder.status === "closed" ? "text-up" : "text-muted"}>
+                        {lastOrder.status}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between pt-1 text-muted">
+                      <span>{lastOrder.side} {lastOrder.outcome} / {lastOrder.type}</span>
+                      <span className="num">{fmtCompact(lastOrder.filled)}/{fmtCompact(lastOrder.amount)} @ {fmtProb(lastOrder.price)}</span>
+                    </div>
+                    {lastOrder.status === "open" && (
+                      <button
+                        type="button"
+                        onClick={cancelLastOrder}
+                        disabled={orderBusy || !walletClient}
+                        className="mt-2 min-h-11 w-full rounded-md border border-hairline px-2 py-1.5 text-[11px] text-muted hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2"
+                      >
+                        Cancel resting order
+                      </button>
+                    )}
+                  </div>
+                )}
+                <p className="text-[10px] leading-relaxed text-muted">DreamDEX execution only. External feeds remain read-only.</p>
+              </form>
+            </Panel>
+          ) : (
+            <Panel title="Manual order">
+              <p className="px-3 pb-3 text-xs text-muted" role="status">Select a market below to place an order.</p>
+            </Panel>
+          )}
         </div>
-        <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_600px] 2xl:grid-cols-[minmax(0,1fr)_660px]">
-        <div className="order-2 min-w-0 lg:order-1">
+        <div className="grid min-w-0 items-start gap-3 lg:grid-cols-2">
+        <div className="flex min-w-0 flex-col gap-3">
         <Panel title={`Event contracts / ${visible.length} of ${markets.length} live`}>
           <div className="min-w-0 max-w-full overflow-x-auto">
             <table className="min-w-[620px] text-left text-xs">
@@ -645,268 +906,22 @@ export default function Terminal() {
             </button>
           )}
         </Panel>
+          {selected && (
+            <>
+              <Panel title="Recent prints">
+                <Tape fills={fills} />
+              </Panel>
+              <Panel title="Window stats">
+                <Stats market={selected} book={book} />
+              </Panel>
+            </>
+          )}
         </div>
 
-        <div className="order-1 flex min-w-0 flex-col gap-3 lg:order-2 xl:grid xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start">
+        <div className="flex min-w-0 flex-col gap-3">
+          <SpotFlowPanel asset={chartAsset} />
           {selected ? (
             <>
-              <Panel title="Manual order">
-                <form onSubmit={submitOrder} className="space-y-3 px-3 pb-3" aria-label="Manual order ticket">
-                  <div className="rounded-md border border-hairline bg-background/70 px-2.5 py-2">
-                    <div className="flex items-center justify-between text-[10px] text-muted">
-                      <span className="num font-medium text-amber">{selected.asset} / {selected.interval}</span>
-                      <span className="num"><Ttm expiry={selected.expiry} now={now} /></span>
-                    </div>
-                    <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-foreground/90">{selected.question}</p>
-                    <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted">
-                      <span>{selected.windowLabel}</span>
-                      <span className="num">YES {book?.mid != null ? fmtProb(book.mid) : "Unavailable"}</span>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1 rounded-md border border-hairline bg-background p-0.5" role="group" aria-label="Order side">
-                    {(["buy", "sell"] as const).map((value) => (
-                      <button
-                        key={value}
-                        type="button"
-                        aria-pressed={orderSide === value}
-                        onClick={() => setOrderSide(value)}
-                        className={`min-h-11 rounded-[4px] px-2 text-xs font-semibold capitalize ease-terminal transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2 md:min-h-9 ${
-                          orderSide === value
-                            ? value === "buy"
-                              ? "bg-up text-background shadow-[0_0_18px_rgba(34,197,94,0.12)]"
-                              : "bg-down text-foreground shadow-[0_0_18px_rgba(239,68,68,0.12)]"
-                            : "text-muted hover:bg-white/[0.05] hover:text-foreground"
-                        }`}
-                      >
-                        {value === "buy" ? "Buy" : "Sell"}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-1.5" role="group" aria-label="Outcome">
-                    <span className="mr-1 text-[10px] text-muted">Contract</span>
-                    {(["YES", "NO"] as const).map((value) => (
-                      <button
-                        key={value}
-                        type="button"
-                        aria-pressed={outcome === value}
-                        onClick={() => setOutcome(value)}
-                        className={`min-h-11 rounded-md border px-3 py-1.5 text-[11px] font-medium ease-terminal transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2 md:min-h-9 ${
-                          outcome === value
-                            ? value === "YES"
-                              ? "border-up/50 bg-up/[0.12] text-up"
-                              : "border-down/50 bg-down/[0.12] text-down"
-                            : "border-hairline text-muted hover:bg-white/[0.04] hover:text-foreground"
-                        }`}
-                      >
-                        {value}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex items-center justify-between border-b border-hairline pb-1" role="group" aria-label="Order type">
-                    <div className="flex items-center gap-4">
-                      {(["limit", "market"] as const).map((value) => (
-                        <button
-                          key={value}
-                          type="button"
-                          aria-pressed={orderType === value}
-                          onClick={() => setOrderType(value)}
-                          className={`relative min-h-11 py-1 text-[11px] capitalize ease-terminal transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2 md:min-h-9 ${
-                            orderType === value
-                              ? "font-medium text-foreground after:absolute after:inset-x-0 after:-bottom-[5px] after:h-0.5 after:bg-amber"
-                              : "text-muted hover:text-foreground"
-                          }`}
-                        >
-                          {value}
-                        </button>
-                      ))}
-                    </div>
-                    <span className="text-[10px] text-muted">Live book</span>
-                  </div>
-                  <div>
-                    <label htmlFor="order-amount" className="mb-1.5 flex items-center justify-between text-[11px] text-muted">
-                      <span>Amount</span>
-                      <span className="text-[10px]">contracts</span>
-                    </label>
-                    <div className="relative">
-                      <input
-                        id="order-amount"
-                        name="amount"
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        step="any"
-                        value={amount}
-                        onChange={(event) => {
-                          setTouchedFields((current) => ({ ...current, amount: true }));
-                          setAmount(event.target.value);
-                        }}
-                        placeholder="0.00"
-                        aria-describedby="order-amount-help"
-                        aria-invalid={Boolean((touchedFields.amount || orderAttempted) && amountInvalid)}
-                        className="num w-full rounded-md border border-hairline bg-background px-3 py-2.5 pr-20 text-sm text-foreground placeholder:text-muted/50 focus:border-amber/60 focus:outline-none focus:ring-1 focus:ring-amber/40"
-                      />
-                      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[10px] text-muted">contracts</span>
-                    </div>
-                    <p id="order-amount-help" className="mt-1 text-[10px] text-muted">Venue lot size is checked before signing.</p>
-                  </div>
-                  {orderType === "limit" ? (
-                    <div>
-                      <div className="mb-1.5 flex items-center justify-between">
-                        <label htmlFor="order-price" className="text-[11px] text-muted">Limit price</label>
-                        <button
-                          type="button"
-                          onClick={() => outcomeMid != null && setPrice((outcomeMid * 100).toFixed(2))}
-                          disabled={outcomeMid == null}
-                          className="min-h-11 rounded border border-hairline px-2 py-1 text-[10px] text-muted hover:bg-white/[0.04] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2 md:min-h-9"
-                        >
-                          Mid {outcomeMid != null ? fmtProb(outcomeMid) : "Unavailable"}
-                        </button>
-                      </div>
-                      <div className="relative">
-                        <input
-                          id="order-price"
-                          name="price"
-                          type="number"
-                          inputMode="decimal"
-                          min="0"
-                          max="100"
-                          step="0.01"
-                          value={price}
-                          onChange={(event) => {
-                            setTouchedFields((current) => ({ ...current, price: true }));
-                            setPrice(event.target.value);
-                          }}
-                          placeholder="50.00"
-                          aria-describedby="order-price-help"
-                          aria-invalid={Boolean((touchedFields.price || orderAttempted) && priceInvalid)}
-                          className="num w-full rounded-md border border-hairline bg-background px-3 py-2.5 pr-24 text-sm text-foreground placeholder:text-muted/50 focus:border-amber/60 focus:outline-none focus:ring-1 focus:ring-amber/40"
-                        />
-                        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[10px] text-muted">%</span>
-                      </div>
-                      <p id="order-price-help" className="mt-1 text-[10px] text-muted">Probability from 0% to 100%.</p>
-                    </div>
-                  ) : (
-                    <details className="rounded-md border border-hairline/70 bg-background/40 group">
-                      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-2.5 py-2 text-[11px] text-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2 md:min-h-9">
-                        <span>Advanced</span>
-                        <CaretDown size={14} weight="regular" aria-hidden="true" className="transition-transform group-open:rotate-180" />
-                      </summary>
-                      <div className="border-t border-hairline px-2.5 pb-2.5 pt-2">
-                        <label htmlFor="order-slippage" className="mb-1.5 flex items-center justify-between text-[11px] text-muted">
-                          <span>Max slippage</span>
-                          <span className="text-[10px]">percent</span>
-                        </label>
-                        <div className="relative">
-                          <input
-                            id="order-slippage"
-                            name="slippage"
-                            type="number"
-                            inputMode="decimal"
-                            min="0"
-                            max="100"
-                            step="0.1"
-                            value={slippage}
-                            onChange={(event) => {
-                              setTouchedFields((current) => ({ ...current, slippage: true }));
-                              setSlippage(event.target.value);
-                            }}
-                            aria-describedby="order-slippage-help"
-                            aria-invalid={Boolean((touchedFields.slippage || orderAttempted) && slippageInvalid)}
-                            className="num w-full rounded-md border border-hairline bg-background px-3 py-2.5 pr-10 text-sm text-foreground placeholder:text-muted/50 focus:border-amber/60 focus:outline-none focus:ring-1 focus:ring-amber/40"
-                          />
-                          <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[10px] text-muted">%</span>
-                        </div>
-                        <p id="order-slippage-help" className="mt-1 text-[10px] text-muted">Market orders cross the opposing book.</p>
-                      </div>
-                    </details>
-                  )}
-                  <dl className="grid grid-cols-2 gap-x-3 gap-y-1 border-t border-hairline pt-2 text-[11px]">
-                    <dt className="text-muted">Available</dt>
-                    <dd className="num text-right">Unavailable</dd>
-                    <dt className="text-muted">Position</dt>
-                    <dd className="num text-right">Unavailable</dd>
-                    <dt className="text-muted">Order size</dt>
-                    <dd className="num text-right">{amount && Number.isFinite(Number(amount)) ? fmtCompact(Number(amount)) : "Unavailable"}</dd>
-                    <dt className="text-muted">Order value</dt>
-                    <dd className="num text-right">{orderValue != null ? fmtCompact(orderValue) : "Unavailable"}</dd>
-                    <dt className="text-muted">Est. price</dt>
-                    <dd className="num text-right">{estimatedPrice != null ? fmtProb(estimatedPrice) : "Unavailable"}</dd>
-                    <dt className="text-muted">Slippage</dt>
-                    <dd className="num text-right">{orderType === "market" && slippage.trim() ? `${slippage}%` : "Unavailable"}</dd>
-                    <dt className="text-muted">Fees</dt>
-                    <dd className="num text-right">Unavailable</dd>
-                  </dl>
-                  {walletError && <p role="alert" className="text-[11px] text-down">{walletError}</p>}
-                  <p aria-live="polite" className={`text-[11px] ${showFormError ? "text-down" : "text-muted"}`}>
-                    {showFormError ? formError : walletAddress ? "Review the order before signing." : "Connect a Somnia Shannon wallet to sign."}
-                  </p>
-                  {walletAddress && !wrongNetwork && (
-                    <p className="flex items-center justify-between text-[11px] text-muted">
-                      <span>Signing as</span>
-                      <span className="num text-foreground">{shortAddress(walletAddress)}</span>
-                    </p>
-                  )}
-                  {orderNotice && (
-                    <p role={orderNotice.kind === "error" ? "alert" : "status"} className={`text-[11px] ${orderNotice.kind === "error" ? "text-down" : "text-up"}`}>
-                      {orderNotice.text}
-                    </p>
-                  )}
-                  {!walletAddress ? (
-                    <button
-                      type="button"
-                      onClick={connectWallet}
-                      disabled={walletBusy}
-                      className="min-h-11 w-full rounded-md bg-foreground px-3 py-2.5 text-xs font-semibold text-background ease-terminal transition-[opacity,transform] hover:opacity-90 active:translate-y-px disabled:cursor-wait disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2"
-                    >
-                      {walletBusy ? "Connecting" : "Connect wallet"}
-                    </button>
-                  ) : wrongNetwork ? (
-                    <button
-                      type="button"
-                      onClick={switchNetwork}
-                      disabled={walletBusy}
-                      className="min-h-11 w-full rounded-md bg-amber px-3 py-2.5 text-xs font-semibold text-background ease-terminal transition-[opacity,transform] hover:opacity-90 active:translate-y-px disabled:cursor-wait disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2"
-                    >
-                      {walletBusy ? "Switching network" : "Switch to Somnia Shannon"}
-                    </button>
-                  ) : (
-                    <button
-                      type="submit"
-                      disabled={Boolean(formError) || orderBusy || !walletClient}
-                      aria-busy={orderBusy}
-                      className={`min-h-11 w-full rounded-md px-3 py-2.5 text-xs font-semibold text-background ease-terminal transition-[opacity,transform] hover:opacity-90 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2 ${orderSide === "buy" ? "bg-up" : "bg-down"}`}
-                    >
-                      {orderBusy ? "Signing" : `${orderSide === "buy" ? "Buy" : "Sell"} ${outcome}`}
-                    </button>
-                  )}
-                  {lastOrder && (
-                    <div className="border-t border-hairline pt-2 text-[11px]" aria-live="polite">
-                      <div className="flex items-center justify-between">
-                        <span className="text-muted">Last order</span>
-                        <span className={lastOrder.status === "open" ? "text-amber" : lastOrder.status === "closed" ? "text-up" : "text-muted"}>
-                          {lastOrder.status}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between pt-1 text-muted">
-                        <span>{lastOrder.side} {lastOrder.outcome} / {lastOrder.type}</span>
-                        <span className="num">{fmtCompact(lastOrder.filled)}/{fmtCompact(lastOrder.amount)} @ {fmtProb(lastOrder.price)}</span>
-                      </div>
-                      {lastOrder.status === "open" && (
-                        <button
-                          type="button"
-                          onClick={cancelLastOrder}
-                          disabled={orderBusy || !walletClient}
-                          className="mt-2 min-h-11 w-full rounded-md border border-hairline px-2 py-1.5 text-[11px] text-muted hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2"
-                        >
-                          Cancel resting order
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  <p className="text-[10px] leading-relaxed text-muted">DreamDEX execution only. External feeds remain read-only.</p>
-                </form>
-              </Panel>
-              <div className="flex min-w-0 flex-col gap-3">
                 <Panel title="Selected window">
                   <div className="px-3 pb-2">
                     <p className="pb-1 text-xs leading-relaxed text-foreground/90">{selected.question}</p>
@@ -930,20 +945,11 @@ export default function Terminal() {
                 <Panel title="YES order book">
                   <div className="pb-2">{book ? <BookLadder book={book} /> : <p className="px-3 py-2 text-xs text-muted" role="status">Waiting for depth</p>}</div>
                 </Panel>
-                <Panel title="Recent prints">
-                  <Tape fills={fills} />
-                </Panel>
-                <Panel title="Window stats">
-                  <Stats market={selected} book={book} />
-                </Panel>
-              </div>
             </>
           ) : (
-            <div className="xl:col-span-2">
-              <Panel title="Selected window">
-                <p className="px-3 pb-3 text-xs text-muted">Select a market to inspect its flow.</p>
-              </Panel>
-            </div>
+            <Panel title="Selected window">
+              <p className="px-3 pb-3 text-xs text-muted">Select a market to inspect its flow.</p>
+            </Panel>
           )}
           </div>
         </div>

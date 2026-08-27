@@ -401,8 +401,8 @@ export default function PriceChart({ asset, onAssetChange }: PriceChartProps) {
   const toolHint = activeTool ? `${activeTool.label}: click ${DRAW_STEPS[activeTool.id]} point${DRAW_STEPS[activeTool.id] === 1 ? "" : "s"}` : "";
 
   return (
-    <section className="min-w-0 max-w-full overflow-hidden rounded-xl border border-hairline bg-panel p-1.5">
-      <div className="min-w-0 max-w-full overflow-hidden rounded-lg bg-panel-raised p-2">
+    <section className="flex h-full min-w-0 max-w-full flex-col overflow-hidden rounded-xl border border-hairline bg-panel p-1.5">
+      <div className="flex h-full min-w-0 max-w-full flex-col overflow-hidden rounded-lg bg-panel-raised p-2">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-1.5 pt-1 pb-2">
           <div className="flex gap-1">
             {(["BTC", "ETH"] as const).map((a) => (
@@ -535,8 +535,8 @@ export default function PriceChart({ asset, onAssetChange }: PriceChartProps) {
           <span className="num text-[10px] text-muted" aria-live="polite" aria-atomic="true">{toolHint}</span>
         </div>
 
-        <div className="relative min-w-0 max-w-full overflow-hidden">
-          <div ref={containerRef} className="h-[360px] min-w-0 max-w-full overflow-hidden px-1 pb-1 md:h-[420px]" aria-label={`${asset} ${tf} candlestick chart`} />
+        <div className="relative min-h-[360px] min-w-0 max-w-full flex-1 overflow-hidden">
+          <div ref={containerRef} className="h-full min-h-[360px] min-w-0 max-w-full overflow-hidden px-1 pb-1" aria-label={`${asset} ${tf} candlestick chart`} />
           {(loading || chartError || (!ohlc && chartReady)) && (
             <div className="pointer-events-none absolute inset-x-4 top-4 flex justify-center">
               <div role={chartError ? "alert" : "status"} className={`flex items-center gap-2 rounded-md border border-hairline bg-background/90 px-2.5 py-1.5 text-[10px] ${chartError ? "text-down" : "text-muted"}`}>
