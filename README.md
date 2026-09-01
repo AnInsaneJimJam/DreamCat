@@ -9,7 +9,7 @@
 **Bloomberg-style trading terminal, AI strategy copilot, and multi-agent bot fleet**
 **for DreamDEX Event Contracts on Somnia**
 
-Discover every live market, read order flow like a pro, design a strategy with an AI copilot, and deploy a fleet of trading cats, in dry-run or live on-chain.
+Discover every live market, read order flow like a pro, design a strategy with an AI copilot, and deploy a fleet of trading cats — in dry-run or live on-chain — with a persistent server that keeps them running while you're away.
 
 <br/>
 
@@ -37,31 +37,14 @@ DreamDEX's **binary event contracts** are BTC/ETH Up/Down windows that settle to
 |---|---|
 | **Observable** | Live book depth, order-flow pressure, prints tape, spot flow, whale radar, and time-to-settlement countdowns. |
 | **Testable** | A parameterized dry-run engine that runs your strategy against the live book, plus an AI copilot that configures it in plain language. |
-| **Tradable** | The same strategies can execute real on-chain orders through a session-scoped burner wallet, with no dry-run ceiling. |
+| **Tradable** | The same strategies execute real on-chain orders through a session-scoped burner wallet, with no dry-run ceiling. |
+| **Persistent** | A standalone fleet server keeps your cats trading even after you close the browser, with wallet-signed auth and automatic recovery. |
 | **Multi-agent** | Deploy up to five concurrent strategy personas ("cats"), each with a capital allocation, and publish results to a wallet-signed public leaderboard. |
 
 For the venue, that is tooling that grows volume, sharpens price discovery, and pulls third-party developers onto the same rails.
 
 > [!NOTE]
 > Everything runs on **Somnia Shannon testnet** against **test USDC**. Dry-run mode signs nothing. Live mode places real testnet orders. There is no mainnet path and no custodial funds.
-
----
-
-## What's new
-
-The terminal has grown well past its dry-run origins.
-
-| Update | Summary |
-|---|---|
-| **Live on-chain execution** | Strategies and manual tickets now place real orders on Somnia testnet, not just paper trades. The chain execution layer (`market-universe/chain-execution`) handles order construction, pool resolution, and receipt verification. |
-| **Session burner wallets** | A deterministic burner is derived from your connected wallet, funded with tUSDC collateral and gas, and executes the fleet. It is fully sweepable back to you, so your main key never signs an order per trade. |
-| **Strategy Copilot** | A guarded AI assistant (`/api/strategy-copilot`) via OpenRouter that explains archetypes and proposes bounded parameter changes in plain language. It is guardrailed to never place orders or handle keys. |
-| **Six strategy archetypes** | Grew from 3 to 6: Maker, Momentum, Fade, Fair-Value, Theta, and Market-Maker. This includes a model-priced fair-value engine and a two-sided quoting maker. |
-| **Spot Flow panel** | Live BTC/ETH CVD-style buy/sell flow with 15s, 1m, and 5m windows, sourced from Binance aggTrade and kline streams. The `SpotFlowPanel` component renders rolling pressure visualizations. |
-| **Signed leaderboard** | Publish and delete are gated by a wallet signature (EIP-191) with a nonce and TTL, so there is no anonymous spam. Board auth and signing are handled through dedicated clients (`board-auth` and `board-client`). |
-| **Live quoting engine** | The `live-quotes` module manages resting bid/ask orders with shadow, single, and dual quoting policies for the market-maker archetype. It tracks fill confirmations and requotes. |
-| **Market Universe indexer** | A full-stack market discovery layer (`market-universe/`) with direct GraphQL indexer queries, on-chain log backfill, third-party registry overlay, and book metadata enrichment, replacing the simpler SDK-only discovery. |
-| **Market Context engine** | Real-time spot, sigma, and prev-spot asset stats (`market-context`) with reference-counted subscriptions, 1-minute sigma refresh from candle returns, and open-price caching for strike resolution. |
 
 ---
 
@@ -84,31 +67,32 @@ Six personas, each mapped to a distinct archetype and a live data source.
 
 ### Terminal (`/terminal`)
 
-- **Live discovery** of every active DreamDEX binary window via `@somnia-chain/markets-sdk` and the Market Universe indexer: top-10 by quote volume with a see-all toggle, refreshed continuously. Venue IDs are read dynamically from market rows, never hardcoded.
+- **Live discovery** of every active DreamDEX binary window via the Market Universe indexer — direct GraphQL queries, on-chain log backfill, third-party registry overlay, and stale-while-revalidate caching. Top-10 by quote volume with a see-all toggle, refreshed continuously. Venue IDs are read dynamically from market rows, never hardcoded.
 - Full **BTC/ETH candlestick analysis** (KLineChart v10): five timeframes (1m, 5m, 15m, 1h, 1d), tick volume, MA/EMA/RSI studies, trend, ray, and channel lines, horizontal levels, Fibonacci retracement, magnet snapping, saved drawings (per asset and timeframe), and PNG snapshots.
 - Per-market detail rail: YES order-book depth ladder, a bid/ask **pressure ribbon** from resting depth, recent prints tape, and time-to-settlement countdowns, streamed over WebSocket watches.
-- **Manual trading**: place limit or market YES/NO tickets directly against the live book.
+- **Manual trading**: place limit or market YES/NO tickets directly against the live book with pool resolution, order construction, and receipt verification.
 - **Burner panel**: derive, fund (collateral plus gas), inspect balances, and sweep a session wallet.
 
 ### Strategy Lab (`/lab`)
 
-- Pick a persona, then tune the archetype's parameters with sliders, or ask the **Strategy Copilot** to configure it for you in plain language.
+- Pick a persona, then tune the archetype's parameters with sliders, or ask the **Strategy Copilot** to configure it for you in plain language. The copilot is a guarded AI assistant via OpenRouter that explains archetypes and proposes bounded parameter changes — it never places orders or handles keys.
 - Run a **dry-run** against the live book. The engine is a pure reducer, `stepSim(config, state, book, fills, now)`, stepped once per second off real WebSocket snapshots.
-- Full **market context** integration: live spot prices, historical volatility (sigma), and open-price caching feed the fair-value and theta archetypes.
+- Full **market context** integration: live spot prices, historical volatility (sigma from 1-minute candle returns), and open-price caching feed the fair-value and theta archetypes via reference-counted subscriptions.
 - Live position card, marked equity in tUSDC, win/loss tally, and a color-coded open/close log.
 
 ### Fleet Deck (`/fleet`)
 
 - Deploy up to **5 cats concurrently**, each on its own window, with a capital-allocation percentage per cat (capped at 100% of a configurable bankroll).
 - Per-cat equity sparklines, aggregate fleet stats, and start/stop-all from the header.
-- **Dry-run or live**: with a funded burner, the fleet executes real on-chain orders via the chain execution layer. The runner lives outside the route tree as a module-level singleton, so cats keep trading while you browse other pages.
+- **Dry-run or live**: with a funded burner, the fleet executes real on-chain orders via the chain execution layer. The live quoting engine manages resting bid/ask orders with shadow, single, and dual quoting policies for the market-maker archetype, tracking fill confirmations and requotes.
+- **Local or server mode**: in local mode, the runner lives outside the route tree as a module-level singleton so cats keep trading while you browse other pages. In server mode, connect your wallet to authenticate with the fleet server — cats keep running even after you close the browser. The UI streams state updates via SSE and automatically falls back to local mode if the server becomes unreachable (3 retries, then graceful fallback with notice).
 - **Cat config modal** for detailed per-cat parameter tuning before deploy.
-- Config persists in `localStorage`, and any result can be published to the leaderboard with one click.
+- Config persists in `localStorage` (local mode) or Redis (server mode), and any result can be published to the leaderboard with one click.
 
 ### Leaderboard (`/leaderboard`)
 
 - Ranked published runs (PnL, trades, win rate, market, age). Backed by Upstash Redis (ZSET) when configured, otherwise a labeled local demo store.
-- **Publish and delete are wallet-signed**. An EIP-191 signature with a nonce and 5-minute TTL proves ownership via `board-auth` and `board-client`.
+- **Publish and delete are wallet-signed**. An EIP-191 signature with a nonce and 5-minute TTL proves ownership.
 - One-click **Clone** drops a published config into your Fleet Deck for review before deploy.
 
 ### Intel Hub (`/intel`)
@@ -123,71 +107,86 @@ Six personas, each mapped to a distinct archetype and a live data source.
 ## Architecture
 
 ```
-browser (Next.js 16 App Router, React 19 client components)
-|
-├─ Terminal / Lab / Fleet
-│   ├─ lib/market-universe/ ──── Market Universe (discovery + chain sync)
-│   │   ├─ indexer.ts            GraphQL discovery, on-chain log backfill,
-│   │   │                        stale-while-revalidate caching
-│   │   ├─ discovery.ts          SDK-backed live market rows, registry overlay
-│   │   ├─ chain-execution.ts    Pool resolution, order construction, receipt
-│   │   │                        verification for live on-chain trades
-│   │   └─ types.ts              Unified LiveMarketRow, MarketOutcome, etc.
-│   │
-│   ├─ lib/dreamdex.ts ──────── SDK wrapper (loadMarkets, watchBook,
-│   │                            watchFills; deduped, reconnecting WS)
-│   │
-│   ├─ lib/market-context.ts ── Real-time asset stats (spot, sigma, prev-spot)
-│   │                            with ref-counted subscriptions
-│   │
-│   └─ lib/prices.ts ────────── BTC/ETH candles (M1/H1/D1 native,
-│                                5m/15m client-aggregated), watchSpot pump-loop
+somnia/
+├── app/                          # Next.js App Router
+│   ├── page.tsx                  # Landing page (hero, ticker, bento)
+│   ├── terminal/                 # Terminal route
+│   ├── lab/                      # Strategy Lab route
+│   ├── fleet/                    # Fleet Deck route
+│   ├── leaderboard/              # Leaderboard route
+│   ├── intel/                    # Intel Hub route
+│   ├── api/                      # API routes
+│   │   ├── markets/              # Cached market universe (server indexer)
+│   │   ├── strategy-copilot/     # AI copilot (rate-limited, guarded prompt)
+│   │   ├── leaderboard/          # Signed publish/delete (nonce + TTL)
+│   │   ├── news/                 # CryptoPanic or CoinDesk RSS fallback
+│   │   ├── polymarket/           # Cross-venue (geo-degrades gracefully)
+│   │   └── spot-flow/            # Spot flow data endpoint
+│   ├── globals.css               # Design system tokens
+│   └── layout.tsx                # Root layout
 │
-├─ Strategy Engine
-│   ├─ lib/strategy.ts           Pure reducer: stepSim() to next state,
-│   │                            6 archetypes, fair-value pricing model
-│   ├─ lib/fleet.ts              Fleet orchestrator (capital weighting, equity)
-│   ├─ lib/fleet-runner.ts       Module-level runner (up to 5 cats, survives nav)
-│   ├─ lib/live-fleet.ts         Live path: intent derivation, on-chain exec
-│   ├─ lib/live-quotes.ts        Resting order management (shadow/single/dual)
-│   ├─ lib/order-queue.ts        Serialized order submission
-│   └─ lib/trading.ts            Order construction and validation
+├── server/                       # Standalone fleet server (Hono)
+│   ├── src/
+│   │   ├── index.ts              # App entry, routes, health check
+│   │   ├── engine.ts             # Fleet manager (1s tick loop, recovery)
+│   │   ├── auth.ts               # Nonce generation + signature verify
+│   │   ├── sse.ts                # SSE connection manager
+│   │   ├── market-data.ts        # Server-side book/trade subscriptions
+│   │   ├── spot-data.ts          # Server-side spot + market context
+│   │   ├── live-intent.ts        # Strategy intent derivation
+│   │   ├── redis.ts              # Sessions, nonces, fleet state, burner
+│   │   ├── routes/               # Auth, fleet, stream endpoints
+│   │   └── middleware/           # Auth guard + rate limiting
+│   ├── railway.toml              # Railway/Render deploy config
+│   └── package.json
 │
-├─ Wallet & Burner
-│   ├─ lib/wallet.ts             EIP-6963 discovery, silent reconnect,
-│   │                            chain-switch (add on 4902)
-│   └─ lib/burner.ts             Deterministic session wallet (viem),
-│                                fund collateral + gas, sweep
+├── components/                   # Client components (one per route)
+│   ├── Terminal.tsx               # Market grid, book ladder, tape, chart
+│   ├── PriceChart.tsx             # KLineChart v10 canvas + overlays
+│   ├── StrategyLab.tsx            # Persona cards, sliders, dry-run engine
+│   ├── StrategyCopilot.tsx        # AI copilot chat interface
+│   ├── FleetDeck.tsx              # Fleet management, sparklines, live stats
+│   ├── CatConfigModal.tsx         # Per-cat parameter tuning modal
+│   ├── BurnerPanel.tsx            # Session wallet management
+│   ├── SpotFlowPanel.tsx          # CVD pressure visualization
+│   ├── IntelHub.tsx               # News, whales, flow, cross-venue
+│   ├── Leaderboard.tsx            # Ranked runs, clone, signed ops
+│   └── landing/                   # Hero, ticker tape, product tour
 │
-├─ API Routes (server-side)
-│   ├─ /api/markets              Cached market universe (server indexer)
-│   ├─ /api/strategy-copilot     OpenRouter AI (rate-limited, guarded prompt)
-│   ├─ /api/leaderboard          lib/store.ts to Upstash Redis or in-memory,
-│   │   (signed publish/delete)   lib/board-auth.ts (nonce + TTL verification)
-│   ├─ /api/news                 CryptoPanic or CoinDesk RSS fallback
-│   ├─ /api/polymarket           Gamma API (geo-degrades gracefully)
-│   └─ /api/spot-flow            Spot flow data endpoint
+├── lib/                          # Core logic (no React)
+│   ├── market-universe/          # Market discovery + chain execution
+│   │   ├── indexer.ts            # GraphQL discovery, on-chain log backfill
+│   │   ├── discovery.ts          # SDK-backed market rows, registry overlay
+│   │   ├── chain-execution.ts    # Pool resolution, order construction
+│   │   └── types.ts              # Unified LiveMarketRow, MarketOutcome
+│   ├── strategy.ts               # Pure reducer: stepSim(), 6 archetypes
+│   ├── fleet-runner.ts           # Module-level fleet runner (local mode)
+│   ├── fleet-bridge.ts           # Local/server transparent switch
+│   ├── fleet-auth.ts             # Server auth (nonce + sign + session)
+│   ├── fleet-client.ts           # SSE client + server command API
+│   ├── live-fleet.ts             # Live trading intent + execution
+│   ├── live-quotes.ts            # Resting order management
+│   ├── order-queue.ts            # Serialized order submission
+│   ├── market-context.ts         # Real-time asset stats (spot, sigma)
+│   ├── dreamdex.ts               # SDK wrapper + WS pump-loops
+│   ├── prices.ts                 # Candle fetching + spot streaming
+│   ├── spot-flow.ts              # Binance CVD data pipeline
+│   ├── whale-tape.ts             # Large-print filter
+│   ├── wallet.ts                 # EIP-6963 wallet layer
+│   ├── burner.ts                 # Session burner wallet
+│   ├── trading.ts                # Order construction and validation
+│   ├── board-auth.ts             # Leaderboard signature verification
+│   ├── board-client.ts           # Leaderboard client-side signing
+│   ├── store.ts                  # Upstash / in-memory leaderboard store
+│   ├── cats.ts                   # Cat persona definitions
+│   ├── fleet.ts                  # Fleet orchestrator (capital, equity)
+│   └── use-now.ts                # Shared clock hook
 │
-├─ Intel Streams (browser-side)
-│   ├─ lib/spot-flow.ts          Binance aggTrade/kline WS, CVD bucketing
-│   └─ lib/whale-tape.ts         Large-print filter (BTC over $50k, ETH over $25k)
-│
-├─ UI Components
-│   ├─ components/Terminal.tsx         Market grid, book ladder, tape, chart
-│   ├─ components/PriceChart.tsx       KLineChart v10 canvas + overlays
-│   ├─ components/StrategyLab.tsx      Persona cards, sliders, dry-run engine
-│   ├─ components/StrategyCopilot.tsx  AI copilot chat interface
-│   ├─ components/FleetDeck.tsx        Fleet management, sparklines, live stats
-│   ├─ components/CatConfigModal.tsx   Per-cat parameter tuning modal
-│   ├─ components/BurnerPanel.tsx      Session wallet management
-│   ├─ components/SpotFlowPanel.tsx    CVD pressure visualization
-│   ├─ components/IntelHub.tsx         News, whales, flow, cross-venue
-│   ├─ components/Leaderboard.tsx      Ranked runs, clone, signed ops
-│   └─ components/landing/            Hero, ticker tape, product tour
-│
-└─ Contracts (Foundry)
-    └─ contracts/                     Third-party composite-market registry
-                                      14 passing tests, deploy script ready
+├── contracts/                    # Foundry (composite-market registry)
+├── scripts/                      # Test + verification scripts
+├── docs/                         # SDK feedback, research notes
+├── design-system/                # Design system documentation
+└── public/cats/                  # Cat avatar images
 ```
 
 ### Stack
@@ -195,12 +194,13 @@ browser (Next.js 16 App Router, React 19 client components)
 | Layer | Technology |
 |---|---|
 | Framework | **Next.js 16** (App Router), **React 19**, **TypeScript** |
+| Fleet Server | **Hono** + **@hono/node-server**, standalone Node.js backend with SSE streaming |
 | Styling | **Tailwind CSS v4**, custom "DreamCat Terminal" design system (dark slate and amber, double-bezel panels, `ease-terminal` motion) |
 | DreamDEX | **`@somnia-chain/markets-sdk` 0.28.1** (discovery, books, trade streams, order placement) |
 | Chain | **`viem`** (wallet clients, contract reads, burner derivation) |
 | Charting | **KLineChart v10**, candlestick analysis with drawing tools |
 | Icons | **Phosphor Icons** |
-| Leaderboard | **Upstash Redis** (optional), ZSET-backed ranked store |
+| Persistence | **Upstash Redis** — fleet state, sessions, nonces, leaderboard (ZSET) |
 | AI Copilot | **OpenRouter** (optional), server-only and rate-limited |
 | Testing | **Playwright** (headless verification), **tsx** (script runner), **Foundry** (contract tests) |
 
@@ -223,13 +223,32 @@ npm run dev -- --port 3111
 
 Open **http://localhost:3111** and explore.
 
+### Fleet server (optional)
+
+The fleet server lets cats trade while the browser is closed. It runs as a separate process and needs its own Upstash Redis credentials.
+
+```bash
+cd server
+npm install
+
+# Set environment variables (or create server/.env)
+# UPSTASH_REDIS_REST_URL=https://your-db.upstash.io
+# UPSTASH_REDIS_REST_TOKEN=your-token
+
+npm run dev          # dev with hot reload (port 4000)
+npm start            # production start
+```
+
+Set `NEXT_PUBLIC_FLEET_SERVER_URL=http://localhost:4000` (or your deployed URL) in the Next.js app's `.env.local` to enable server mode in the Fleet Deck.
+
 ### Environment variables
 
 All optional. The terminal is fully functional without any of them.
 
 | Variable | Purpose |
 |---|---|
-| `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` | Shared leaderboard store. Without them, `/leaderboard` runs in labeled local demo mode. |
+| `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` | Shared leaderboard store and fleet server persistence. Without them, `/leaderboard` runs in labeled local demo mode and the fleet server cannot start. |
+| `NEXT_PUBLIC_FLEET_SERVER_URL` | URL of the fleet server (e.g. `https://your-app.onrender.com`). Without it, the fleet runs in browser-only local mode. |
 | `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` | Enables the Strategy Copilot AI. Server-only, so never prefix with `NEXT_PUBLIC_`. Without a key, the copilot is disabled and sliders still work. |
 | `CRYPTOPANIC_TOKEN` | CryptoPanic free-tier token for the Intel news feed. Falls back to CoinDesk RSS. |
 | `NEXT_PUBLIC_INDEXER_URL` and `NEXT_PUBLIC_WS_RPC_URL` | Overrides for the indexer GraphQL and Somnia WebSocket RPC. Shannon defaults are baked in. |
@@ -241,7 +260,7 @@ All optional. The terminal is fully functional without any of them.
 | `/` | Landing: hero, live ticker tape, product tour |
 | `/terminal` | Market discovery, chart, book ladder, tape, flow, manual trading |
 | `/lab` | Strategy Lab: personas, sliders, AI copilot, live-book dry-run |
-| `/fleet` | Fleet Deck: up to 5 concurrent cats, allocations, dry-run or live |
+| `/fleet` | Fleet Deck: up to 5 concurrent cats, allocations, dry-run or live, local or server |
 | `/leaderboard` | Signed published runs, one-click clone |
 | `/intel` | News, whale radar, spot flow, cross-venue odds |
 
@@ -275,6 +294,38 @@ Live mode never asks your main wallet to sign every order. Instead:
 5. **Sweep** returns remaining balances to you at any time.
 
 This keeps the blast radius small, keeps signing out of the hot path, and mirrors how a production bot runner would be isolated from a user's primary key.
+
+---
+
+## Fleet Server
+
+The fleet server is a standalone Hono backend that executes strategy ticks server-side, so cats keep trading after the browser is closed.
+
+```
+┌──────────────────┐   wallet sign    ┌──────────────────┐
+│  Browser (Fleet  │ ─────────────>  │  Fleet Server    │
+│  Deck + Bridge)  │   SSE stream    │  (Hono on Render)│
+│                  │ <─────────────  │                  │
+└────────┬─────────┘                 └────────┬─────────┘
+         │                                    │
+    local fallback                      1s tick loop
+    (if server down)                  ┌───────┼────────┐
+                                      │       │        │
+                                      v       v        v
+                                   Book    Trades    Spot
+                                   WS       WS      data
+                                      │       │        │
+                                      v       v        v
+                                  ┌──────────────────────┐
+                                  │   Upstash Redis      │
+                                  │  sessions, nonces,   │
+                                  │  fleet state, burner │
+                                  └──────────────────────┘
+```
+
+**Auth flow:** Connect wallet → fetch nonce → sign message → verify signature → session token (stored in `sessionStorage`, 24h TTL).
+
+**Resilience:** The bridge retries up to 3 times on disconnect, then falls back to local mode with a notice. Offline detection (`navigator.onLine`) triggers immediate fallback. On server restart, `fleetManager.recoverFleets()` rehydrates all active fleets from Redis. Idle fleets time out after 30 minutes with no connected listeners.
 
 ---
 
@@ -344,66 +395,13 @@ Full SDK sharp-edges write-up: **[`docs/sdk-feedback.md`](docs/sdk-feedback.md)*
 
 ---
 
-## Project Structure
-
-```
-somnia/
-├── app/                          # Next.js App Router
-│   ├── page.tsx                  # Landing page (hero, ticker, bento)
-│   ├── terminal/                 # Terminal route
-│   ├── lab/                      # Strategy Lab route
-│   ├── fleet/                    # Fleet Deck route
-│   ├── leaderboard/              # Leaderboard route
-│   ├── intel/                    # Intel Hub route
-│   ├── api/                      # API routes
-│   │   ├── markets/              # Cached market universe
-│   │   ├── strategy-copilot/     # AI copilot endpoint
-│   │   ├── leaderboard/          # Signed publish/delete
-│   │   ├── news/                 # News aggregation
-│   │   ├── polymarket/           # Cross-venue data
-│   │   └── spot-flow/            # Spot flow endpoint
-│   ├── globals.css               # Design system tokens
-│   └── layout.tsx                # Root layout
-├── components/                   # Client components (one per route)
-│   ├── landing/                  # Landing page sub-components
-│   └── *.tsx                     # Terminal, Lab, Fleet, Intel, etc.
-├── lib/                          # Core logic (no React)
-│   ├── market-universe/          # Market discovery + chain execution
-│   ├── strategy.ts               # Pure strategy engine (6 archetypes)
-│   ├── strategy-copilot.ts       # Copilot prompt construction + parsing
-│   ├── fleet-runner.ts           # Module-level fleet runner
-│   ├── live-fleet.ts             # Live trading intent + execution
-│   ├── live-quotes.ts            # Resting order management
-│   ├── order-queue.ts            # Serialized order submission
-│   ├── market-context.ts         # Real-time asset stats
-│   ├── dreamdex.ts               # SDK wrapper + WS pump-loops
-│   ├── prices.ts                 # Candle fetching + spot streaming
-│   ├── spot-flow.ts              # Binance CVD data pipeline
-│   ├── whale-tape.ts             # Large-print filter
-│   ├── wallet.ts                 # EIP-6963 wallet layer
-│   ├── burner.ts                 # Session burner wallet
-│   ├── trading.ts                # Order construction
-│   ├── board-auth.ts             # Leaderboard signature verification
-│   ├── board-client.ts           # Leaderboard client-side signing
-│   ├── store.ts                  # Upstash / in-memory leaderboard store
-│   ├── cats.ts                   # Cat persona definitions
-│   ├── fleet.ts                  # Fleet orchestrator (capital, equity)
-│   └── use-now.ts                # Shared clock hook
-├── contracts/                    # Foundry (composite-market registry)
-├── scripts/                      # Test + verification scripts
-├── docs/                         # SDK feedback, research notes
-├── design-system/                # Design system documentation
-└── public/cats/                  # Cat avatar images
-```
-
----
-
 ## Hackathon Submission
 
 | Item | Status |
 |---|---|
 | Working prototype on Somnia testnet | Done. All surfaces live against Shannon (50312) |
 | Live on-chain trading path | Done. Session-burner execution via markets-sdk trader plus chain execution layer |
+| Persistent fleet server | Done. Standalone Hono backend with wallet-signed auth, SSE streaming, Redis persistence, auto-recovery, and graceful shutdown |
 | Market Universe indexer | Done. Direct GraphQL plus on-chain backfill plus registry overlay |
 | Six strategy archetypes | Done. Maker, Momentum, Fade, Fair-Value, Theta, Market-Maker |
 | AI Strategy Copilot | Done. Guarded OpenRouter integration with bounded parameter proposals |
@@ -411,6 +409,8 @@ somnia/
 | Signed leaderboard | Done. EIP-191 wallet signatures with nonce and TTL |
 | Public repo and README on Event Contracts / SDK usage | Done. This file plus integration notes |
 | SDK/docs feedback report | Done. [`docs/sdk-feedback.md`](docs/sdk-feedback.md) |
+| Deployed frontend | Done. [dreamcat-somnia.vercel.app](https://dreamcat-somnia.vercel.app) |
+| Deployed fleet server | Done. Render with Upstash Redis |
 | Demo video | In progress |
 
 ---
