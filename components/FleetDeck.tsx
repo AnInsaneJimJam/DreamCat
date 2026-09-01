@@ -7,7 +7,9 @@ import {
   Info,
   Lightning,
   Play,
+  Plugs,
   Plus,
+  SignOut,
   Stop,
   Trash,
   UploadSimple,
@@ -23,6 +25,31 @@ import CatConfigModal from "@/components/CatConfigModal";
 import { TEMPLATES, type StrategyParams } from "@/lib/strategy";
 import { canTradeLive, isQuotingArchetype } from "@/lib/live-fleet";
 import { connectBoardSigner, publishRun, restoreBoardSigner } from "@/lib/board-client";
+import { authenticateFleetServer } from "@/lib/fleet-auth";
+import {
+  bridgeSetFleetRunning,
+  bridgeSetFleetMode,
+  bridgeSetFleetBankroll,
+  bridgeAddCat,
+  bridgeUpdateFleetCats,
+  bridgeUpdateFleetCatConfig,
+  bridgeRemoveFleetCat,
+  bridgeSetQuotePolicy,
+  bridgeHydrateFleet,
+  bridgeSetFleetMarkets,
+  bridgeAcknowledgeDroppedPositions,
+  bridgeAcknowledgeOrphanQuotes,
+  connectServerFleet,
+  disconnectServerFleet,
+  isServerMode,
+  getConnectionStatus,
+  subscribeConnectionStatus,
+  subscribeFleetBridge,
+  getFleetBridgeState,
+  getFleetBridgeServerState,
+  getFallbackNotice,
+  clearFallbackNotice,
+} from "@/lib/fleet-bridge";
 import type { QuotePolicy } from "@/lib/live-quotes";
 import type { Address } from "viem";
 import { useNow } from "@/lib/use-now";
@@ -35,24 +62,12 @@ import {
   totalAlloc,
   type FleetCat,
 } from "@/lib/fleet";
+import { EMPTY_BOOK, type FleetMode } from "@/lib/fleet-runner";
 import {
-  EMPTY_BOOK,
-  acknowledgeDroppedPositions,
-  acknowledgeOrphanQuotes,
-  getFleetServerState,
-  getFleetState,
-  hydrateFleet,
-  removeFleetCat,
-  setFleetBankroll,
-  setFleetMarkets,
-  setFleetMode,
-  setFleetRunning,
-  setQuotePolicy,
-  subscribeFleet,
-  updateFleetCatConfig,
-  updateFleetCats,
-  type FleetMode,
-} from "@/lib/fleet-runner";
+  connectWalletProvider,
+  discoverWalletProviders,
+  rememberedWalletProvider,
+} from "@/lib/wallet";
 
 const fmtProb = (n: number) => `${(n * 100).toFixed(1)}%`;
 
@@ -219,7 +234,9 @@ interface Draft {
 type MarketStatus = "loading" | "ready" | "error";
 
 export default function FleetDeck() {
-  const fleet = useSyncExternalStore(subscribeFleet, getFleetState, getFleetServerState);
+  const fleet = useSyncExternalStore(subscribeFleetBridge, getFleetBridgeState, getFleetBridgeServerState);
+  const connStatus = useSyncExternalStore(subscribeConnectionStatus, getConnectionStatus, () => "local" as const);
+  const fallbackNotice = useSyncExternalStore(subscribeConnectionStatus, getFallbackNotice, () => null);
   const {
     cats,
     running,
@@ -240,21 +257,25 @@ export default function FleetDeck() {
   const [draftError, setDraftError] = useState("");
   const [modal, setModal] = useState<{ mode: "create" } | { mode: "edit"; slot: number } | null>(null);
   const [modeError, setModeError] = useState("");
+  const [serverBusy, setServerBusy] = useState(false);
+  const [serverError, setServerError] = useState("");
+  const [walletConn, setWalletConn] = useState<{ address: string; walletClient: import("viem").WalletClient } | null>(null);
   const marketsRef = useRef(markets);
   const refreshingRef = useRef(false);
   const now = useNow();
+  const serverMode = isServerMode();
 
   useEffect(() => {
     marketsRef.current = markets;
   }, [markets]);
 
   useEffect(() => {
-    const kick = setTimeout(hydrateFleet, 0);
+    const kick = setTimeout(bridgeHydrateFleet, 0);
     return () => clearTimeout(kick);
   }, []);
 
   useEffect(() => {
-    setFleetMarkets(markets);
+    bridgeSetFleetMarkets(markets);
   }, [markets]);
 
   const refreshMarkets = useCallback(async () => {
@@ -278,12 +299,44 @@ export default function FleetDeck() {
 
   useEffect(() => {
     const kick = setTimeout(() => void refreshMarkets(), 0);
+    if (serverMode) return () => clearTimeout(kick);
     const timer = setInterval(() => void refreshMarkets(), 10000);
     return () => {
       clearTimeout(kick);
       clearInterval(timer);
     };
-  }, [refreshMarkets]);
+  }, [refreshMarkets, serverMode]);
+
+  const handleServerConnect = useCallback(async () => {
+    setServerBusy(true);
+    setServerError("");
+    try {
+      let conn = walletConn;
+      if (!conn) {
+        const providers = await discoverWalletProviders();
+        const remembered = rememberedWalletProvider();
+        const target = providers.find((p) => p.id === remembered) ?? providers[0];
+        if (!target) { setServerError("No wallet found."); return; }
+        const result = await connectWalletProvider(target);
+        conn = { address: result.address, walletClient: result.walletClient };
+        setWalletConn(conn);
+      }
+      const signMessage = async (msg: string) => {
+        return await conn!.walletClient.signMessage({ account: conn!.address as `0x${string}`, message: msg });
+      };
+      const sid = await authenticateFleetServer(signMessage, conn.address);
+      await connectServerFleet(sid);
+    } catch (err) {
+      setServerError(err instanceof Error ? err.message : "Connection failed.");
+    } finally {
+      setServerBusy(false);
+    }
+  }, [walletConn]);
+
+  const handleServerDisconnect = useCallback(() => {
+    disconnectServerFleet();
+    setServerError("");
+  }, []);
 
   useEffect(() => {
     if (!markets.length) return;
@@ -294,7 +347,7 @@ export default function FleetDeck() {
         localStorage.removeItem("dreamcat-pending-clone");
         const cat = JSON.parse(raw) as FleetCat;
         if (cats.length >= MAX_CATS) return;
-        updateFleetCats((current) =>
+        bridgeUpdateFleetCats((current) =>
           current.some((item) => item.slot === cat.slot)
             ? current
             : [...current, { ...cat, marketId: cat.marketId || markets[0].id, sim: { ...cat.sim, position: null, log: [] } }]
@@ -328,7 +381,7 @@ export default function FleetDeck() {
   const createCat = useCallback((params: StrategyParams, allocPct: number) => {
     const template = draftTemplate;
     const slot = cats.reduce((max, cat) => Math.max(max, cat.slot), -1) + 1;
-    const cat = freshCat({
+    const input = {
       slot,
       name: cats.some((item) => item.name === template.cat) ? `${template.cat} II` : template.cat,
       accent: nextAccent(cats),
@@ -336,13 +389,17 @@ export default function FleetDeck() {
       params,
       marketId: draft.marketId,
       allocPct,
-    });
-    updateFleetCats((current) => [...current, cat]);
+    };
+    if (isServerMode()) {
+      void bridgeAddCat(input);
+    } else {
+      bridgeUpdateFleetCats((current) => [...current, freshCat(input)]);
+    }
     setModal(null);
   }, [cats, draft.marketId, draftTemplate]);
 
   const applyCatConfig = useCallback((slot: number, params: StrategyParams, allocPct: number) => {
-    updateFleetCatConfig(slot, params, allocPct);
+    bridgeUpdateFleetCatConfig(slot, params, allocPct);
     setModal(null);
   }, []);
 
@@ -396,6 +453,24 @@ export default function FleetDeck() {
           </h1>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 rounded-[var(--radius-control)] border border-line px-3 py-2 text-xs text-text-2">
+            <span className={`inline-block h-1.5 w-1.5 rounded-full ${connStatus === "connected" ? "bg-buy" : connStatus === "reconnecting" ? "bg-brand animate-pulse" : connStatus === "error" ? "bg-sell" : "bg-text-3"}`} />
+            <span>{connStatus === "connected" ? "Running on server" : connStatus === "reconnecting" ? "Reconnecting…" : connStatus === "error" ? "Server unreachable" : "Local mode"}</span>
+            {connStatus === "error" ? (
+              <button type="button" onClick={handleServerDisconnect} className="ml-1 cursor-pointer text-[11px] font-semibold text-brand hover:underline">Switch to local</button>
+            ) : null}
+          </div>
+          {connStatus === "local" ? (
+            <button type="button" onClick={() => void handleServerConnect()} disabled={serverBusy} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border border-line-strong bg-surface-1 px-3.5 text-xs font-semibold text-text-1 transition-colors duration-150 hover:border-brand/60 hover:text-brand disabled:cursor-wait disabled:opacity-50">
+              {serverBusy ? <CircleNotch aria-hidden="true" className="animate-spin" size={14} /> : <Plugs aria-hidden="true" size={14} />}
+              Connect to server
+            </button>
+          ) : connStatus === "connected" ? (
+            <button type="button" onClick={handleServerDisconnect} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border border-line-strong bg-surface-1 px-3.5 text-xs font-semibold text-text-1 transition-colors duration-150 hover:border-sell/60 hover:text-sell">
+              <SignOut aria-hidden="true" size={14} />
+              Disconnect
+            </button>
+          ) : null}
           <div className="flex items-center gap-2 rounded-[var(--radius-control)] border border-line px-3 py-2 text-xs text-text-2">
             <Broadcast aria-hidden="true" className={marketStatus === "ready" ? "text-buy" : "text-brand"} size={15} weight="fill" />
             <span>{marketStatus === "ready" ? `${markets.length} live windows` : marketStatus === "loading" ? "Loading markets" : "Feed unavailable"}</span>
@@ -411,7 +486,7 @@ export default function FleetDeck() {
                 aria-pressed={mode === option}
                 disabled={option === "live" && !burnerReady}
                 title={option === "live" && !burnerReady ? "Create and fund the cat wallet first" : undefined}
-                onClick={() => setModeError(setFleetMode(option) ?? "")}
+                onClick={() => setModeError(bridgeSetFleetMode(option) ?? "")}
                 className={`min-h-10 cursor-pointer rounded-[calc(var(--radius-control)-2px)] px-3 text-xs font-semibold transition-colors duration-150 ${
                   mode === option
                     ? option === "live"
@@ -424,7 +499,7 @@ export default function FleetDeck() {
               </button>
             ))}
           </div>
-          <button type="button" aria-pressed={running} disabled={!cats.length} onClick={() => setFleetRunning(!running)} className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] px-3.5 text-xs font-semibold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40 ${running ? "bg-sell/[0.14] text-sell hover:bg-sell/[0.22]" : "bg-brand text-brand-ink hover:bg-brand-strong"}`}>
+          <button type="button" aria-pressed={running} disabled={!cats.length} onClick={() => bridgeSetFleetRunning(!running)} className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] px-3.5 text-xs font-semibold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40 ${running ? "bg-sell/[0.14] text-sell hover:bg-sell/[0.22]" : "bg-brand text-brand-ink hover:bg-brand-strong"}`}>
             {running ? <Stop aria-hidden="true" size={14} weight="fill" /> : <Play aria-hidden="true" size={14} weight="fill" />}
             {running ? "Stop fleet" : "Deploy fleet"}
           </button>
@@ -438,7 +513,7 @@ export default function FleetDeck() {
             <span>
               {droppedPositions === 1 ? "1 open paper position was" : `${droppedPositions} open paper positions were`} cleared on reload — they could not be marked against a live book from the previous session.
             </span>
-            <button type="button" onClick={acknowledgeDroppedPositions} className="ml-auto min-h-11 cursor-pointer rounded-[var(--radius-control)] px-2 text-xs font-semibold text-brand hover:bg-brand/[0.12] md:min-h-9">
+            <button type="button" onClick={bridgeAcknowledgeDroppedPositions} className="ml-auto min-h-11 cursor-pointer rounded-[var(--radius-control)] px-2 text-xs font-semibold text-brand hover:bg-brand/[0.12] md:min-h-9">
               Dismiss
             </button>
           </div>
@@ -454,13 +529,33 @@ export default function FleetDeck() {
           </div>
         ) : null}
 
+        {serverError ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius-panel)] border border-sell/40 bg-sell/[0.06] px-3 py-2 text-xs text-text-2" role="alert">
+            <WarningCircle aria-hidden="true" className="shrink-0 text-sell" size={15} weight="fill" />
+            <span>{serverError}</span>
+            <button type="button" onClick={() => setServerError("")} className="ml-auto min-h-11 cursor-pointer rounded-[var(--radius-control)] px-2 text-xs font-semibold text-sell hover:bg-sell/[0.12] md:min-h-9">
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
+        {fallbackNotice ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius-panel)] border border-brand/40 bg-brand/[0.06] px-3 py-2 text-xs text-text-2" role="status">
+            <WarningCircle aria-hidden="true" className="shrink-0 text-brand" size={15} weight="fill" />
+            <span>{fallbackNotice}</span>
+            <button type="button" onClick={clearFallbackNotice} className="ml-auto min-h-11 cursor-pointer rounded-[var(--radius-control)] px-2 text-xs font-semibold text-brand hover:bg-brand/[0.12] md:min-h-9">
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
         {orphanQuotes > 0 ? (
           <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius-panel)] border border-brand/40 bg-brand/[0.06] px-3 py-2 text-xs text-text-2" role="status">
             <WarningCircle aria-hidden="true" className="shrink-0 text-brand" size={15} weight="fill" />
             <span>
               {orphanQuotes === 1 ? "1 resting order was" : `${orphanQuotes} resting orders were`} left on the book by an earlier session and {orphanQuotes === 1 ? "has" : "have"} been cancelled.
             </span>
-            <button type="button" onClick={acknowledgeOrphanQuotes} className="ml-auto min-h-11 cursor-pointer rounded-[var(--radius-control)] px-2 text-xs font-semibold text-brand hover:bg-brand/[0.12] md:min-h-9">
+            <button type="button" onClick={bridgeAcknowledgeOrphanQuotes} className="ml-auto min-h-11 cursor-pointer rounded-[var(--radius-control)] px-2 text-xs font-semibold text-brand hover:bg-brand/[0.12] md:min-h-9">
               Dismiss
             </button>
           </div>
@@ -493,7 +588,7 @@ export default function FleetDeck() {
                             ? "Rest one side at a time"
                             : "Rest both sides of the spread"
                       }
-                      onClick={() => setQuotePolicy(option)}
+                      onClick={() => bridgeSetQuotePolicy(option)}
                       className={`min-h-9 cursor-pointer rounded-[calc(var(--radius-control)-2px)] px-2.5 text-[11px] font-semibold capitalize transition-colors duration-150 ${
                         quotePolicy === option ? "bg-surface-3 text-text-1" : "text-text-3 hover:text-text-1"
                       }`}
@@ -546,7 +641,7 @@ export default function FleetDeck() {
                 <h2 id="fleet-capital-heading" className="text-[10px] uppercase tracking-[0.18em] text-text-3">Capital</h2>
                 <div className="mt-2 flex items-center gap-2">
                   <label htmlFor="fleet-bankroll" className="sr-only">Fleet bankroll in tUSDC</label>
-                  <input id="fleet-bankroll" type="number" min={100} step={100} value={bankroll} onChange={(event) => setFleetBankroll(Math.max(100, Number(event.target.value) || 100))} className="num min-h-11 w-full min-w-0 rounded-[var(--radius-control)] border border-line-strong bg-surface-1 px-2 text-lg font-semibold text-text-1 outline-none focus:border-brand" />
+                  <input id="fleet-bankroll" type="number" min={100} step={100} value={bankroll} onChange={(event) => bridgeSetFleetBankroll(Math.max(100, Number(event.target.value) || 100))} className="num min-h-11 w-full min-w-0 rounded-[var(--radius-control)] border border-line-strong bg-surface-1 px-2 text-lg font-semibold text-text-1 outline-none focus:border-brand" />
                   <span className="num shrink-0 text-[10px] text-text-3">tUSDC</span>
                 </div>
                 <div className="mt-3 flex h-1.5 overflow-hidden rounded-full bg-surface-3" role="img" aria-label={`${allocUsed}% of capital allocated across ${cats.length} cats`}>
@@ -660,7 +755,7 @@ export default function FleetDeck() {
                         <button type="button" onClick={() => void publishCat(cat)} disabled={publishState === "sending"} aria-label={publishState === "done" ? `Published ${cat.name} to board` : publishState === "fail" ? `Retry publishing ${cat.name}` : `Publish ${cat.name} to board`} className={`flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-[var(--radius-control)] transition-colors duration-150 disabled:cursor-wait disabled:opacity-50 ${publishState === "done" ? "text-buy" : publishState === "fail" ? "text-sell hover:bg-sell/[0.1]" : "text-text-3 hover:bg-surface-3 hover:text-brand"}`}>
                           {publishState === "sending" ? <CircleNotch aria-hidden="true" className="animate-spin" size={16} /> : publishState === "done" ? <Check aria-hidden="true" size={16} weight="bold" /> : publishState === "fail" ? <WarningCircle aria-hidden="true" size={16} weight="fill" /> : <UploadSimple aria-hidden="true" size={16} />}
                         </button>
-                        <button type="button" onClick={() => setModeError(removeFleetCat(cat.slot) ?? "")} aria-label={`Remove ${cat.name} from fleet`} className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-[var(--radius-control)] text-text-3 transition-colors duration-150 hover:bg-sell/[0.1] hover:text-sell">
+                        <button type="button" onClick={() => setModeError(bridgeRemoveFleetCat(cat.slot) ?? "")} aria-label={`Remove ${cat.name} from fleet`} className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-[var(--radius-control)] text-text-3 transition-colors duration-150 hover:bg-sell/[0.1] hover:text-sell">
                           <Trash aria-hidden="true" size={16} />
                         </button>
                       </div>
@@ -674,7 +769,7 @@ export default function FleetDeck() {
 
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-[11px] text-text-3">
           <Broadcast aria-hidden="true" className="text-buy" size={13} weight="fill" />
-          <span>Each cat paper-trades its own live window through WebSocket data. Fleet settings persist locally.</span>
+          <span>{serverMode ? "Fleet runs on server. Close this tab and your cats keep trading." : "Each cat paper-trades its own live window through WebSocket data. Fleet settings persist locally."}</span>
         </p>
       </main>
 

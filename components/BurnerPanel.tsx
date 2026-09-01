@@ -17,6 +17,9 @@ import {
   type BurnerWallet,
 } from "@/lib/burner";
 import { setFleetBurner } from "@/lib/fleet-runner";
+import { isServerMode } from "@/lib/fleet-bridge";
+import { getFleetSession } from "@/lib/fleet-auth";
+import { serverSetBurnerKey } from "@/lib/fleet-client";
 import {
   connectWalletProvider,
   discoverWalletProviders,
@@ -75,6 +78,10 @@ export default function BurnerPanel({ collateral }: { collateral: Address | null
 
   useEffect(() => {
     setFleetBurner(burner);
+    if (burner && isServerMode()) {
+      const sid = getFleetSession();
+      if (sid) void serverSetBurnerKey(sid, burner.privateKey).catch(() => {});
+    }
   }, [burner]);
 
   const refreshBalances = useCallback(async () => {

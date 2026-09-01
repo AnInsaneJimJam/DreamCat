@@ -15,6 +15,7 @@ const eslintConfig = defineConfig([
     // Foundry workspace (Solidity sources, build artifacts, vendored deps):
     "contracts/**",
     ".agents/**",
+    "server/dist/**",
   ]),
 ]);
 

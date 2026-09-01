@@ -1,0 +1,8 @@
+[build]
+builder = "nixpacks"
+buildCommand = "npm ci && npm run build"
+
+[deploy]
+startCommand = "npx tsx src/index.ts"
+healthcheckPath = "/health"
+restartPolicyType = "on_failure"

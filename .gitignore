@@ -39,9 +39,17 @@ yarn-error.log*
 .env*
 !.env.local.example
 
+# server
+server/node_modules
+server/dist
+
 # vercel
 .vercel
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# compiled artifacts from server build (lib/ is TypeScript source)
+lib/**/*.js
+lib/**/*.d.ts
