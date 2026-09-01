@@ -12,7 +12,7 @@ const auth = new Hono<AuthEnv>();
 auth.get("/nonce", async (c) => {
   const { nonce, expiresAt } = generateNonce();
   const address = c.req.query("address");
-  if (!address || !isAddress(address)) {
+  if (!address || !isAddress(address, { strict: false })) {
     return c.json({ error: "Missing or invalid address query param" }, 400);
   }
   await saveNonce(nonce, address);
@@ -21,7 +21,7 @@ auth.get("/nonce", async (c) => {
 
 auth.post("/verify", async (c) => {
   const body = await c.req.json<{ address?: string; signature?: string; nonce?: string }>();
-  if (!body.address || !isAddress(body.address)) {
+  if (!body.address || !isAddress(body.address, { strict: false })) {
     return c.json({ error: "Invalid address" }, 400);
   }
   if (!body.signature || !body.nonce) {
