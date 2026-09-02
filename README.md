@@ -21,6 +21,17 @@ Discover every live market, read order flow like a pro, design a strategy with a
 
 Built for the **Somnia x DreamDEX Event Contracts Hackathon** on DoraHacks.
 
+<br/>
+
+[![Live Demo](https://img.shields.io/badge/▶_Live_Demo-dreamcat--somnia.vercel.app-0e7c7b?style=for-the-badge)](https://dreamcat-somnia.vercel.app)
+[![Watch on YouTube](https://img.shields.io/badge/🎬_Watch_the_Demo-YouTube-ff0000?style=for-the-badge)](https://youtu.be/5kwpbkOtGr8)
+
+<br/>
+
+[![DreamCat demo video](https://img.youtube.com/vi/5kwpbkOtGr8/maxresdefault.jpg)](https://youtu.be/5kwpbkOtGr8)
+
+<br/>
+
 [Terminal](#terminal--terminal) | [Strategy Lab](#strategy-lab--lab) | [Fleet Deck](#fleet-deck--fleet) | [Leaderboard](#leaderboard--leaderboard) | [Intel Hub](#intel-hub--intel) | [Architecture](#architecture)
 
 </div>
@@ -411,7 +422,7 @@ Full SDK sharp-edges write-up: **[`docs/sdk-feedback.md`](docs/sdk-feedback.md)*
 | SDK/docs feedback report | Done. [`docs/sdk-feedback.md`](docs/sdk-feedback.md) |
 | Deployed frontend | Done. [dreamcat-somnia.vercel.app](https://dreamcat-somnia.vercel.app) |
 | Deployed fleet server | Done. Render with Upstash Redis |
-| Demo video | In progress |
+| Demo video | Done. [youtu.be/5kwpbkOtGr8](https://youtu.be/5kwpbkOtGr8) |
 
 ---
 

@@ -16,7 +16,6 @@
 # local agent skills
 /.agents/skills/
 .playwright-mcp
-brag-output
 
 # next.js
 /.next/

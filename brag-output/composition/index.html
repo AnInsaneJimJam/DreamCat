@@ -1,0 +1,907 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>DreamCat Terminal — Launch Film</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      :root {
+        --canvas: #090d13;
+        --surface-1: #0e141d;
+        --surface-2: #131b26;
+        --surface-3: #192331;
+        --text-1: #f2f5f7;
+        --text-2: #a5b0bf;
+        --text-3: #718093;
+        --line: rgba(218, 226, 236, 0.12);
+        --line-strong: rgba(218, 226, 236, 0.22);
+        --brand: #f2b84b;
+        --brand-strong: #ffca63;
+        --eye: #f5de3c;
+        --cream: #fbf8e8;
+        --ink: #0b0b0b;
+        --brand-ink: #0b1016;
+        --up: #3fd39a;
+        --down: #f2747c;
+        --headline: "Bricolage Grotesque", "Space Grotesk", system-ui, sans-serif;
+        --body: "Inter", system-ui, sans-serif;
+        --mono: "JetBrains Mono", ui-monospace, monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--canvas);
+        color: var(--text-1);
+        font-family: var(--body);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+      }
+
+      /* ---------- shared continuous background ---------- */
+      #bg {
+        position: absolute;
+        inset: 0;
+        background: var(--canvas);
+      }
+      #bg-glow {
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(80rem 44rem at 76% -8%, rgba(242, 184, 75, 0.16), transparent 66%),
+          radial-gradient(56rem 34rem at 6% 24%, rgba(82, 111, 136, 0.1), transparent 72%);
+        will-change: opacity, transform;
+      }
+      #bg-vignette {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background:
+          linear-gradient(180deg, rgba(4, 6, 10, 0.55) 0%, transparent 12%, transparent 86%, rgba(4, 6, 10, 0.72) 100%);
+      }
+      #bg-grid {
+        position: absolute;
+        inset: 0;
+        opacity: 0.5;
+        background-image:
+          linear-gradient(rgba(218, 226, 236, 0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(218, 226, 236, 0.035) 1px, transparent 1px);
+        background-size: 64px 64px;
+        mask-image: radial-gradient(120rem 70rem at 50% 42%, #000 30%, transparent 78%);
+        -webkit-mask-image: radial-gradient(120rem 70rem at 50% 42%, #000 30%, transparent 78%);
+      }
+
+      /* ---------- scene scaffolding ---------- */
+      .clip {
+        position: absolute;
+        inset: 0;
+        background: transparent;
+      }
+      .scene-inner {
+        position: absolute;
+        inset: 0;
+        will-change: opacity;
+      }
+
+      /* two-column product scene */
+      .stage {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        grid-template-columns: 486px 1fr;
+        align-items: center;
+        gap: 44px;
+        padding: 0 56px;
+      }
+      .col-copy {
+        max-width: 470px;
+      }
+      .kicker {
+        font-family: var(--mono);
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.26em;
+        text-transform: uppercase;
+        color: var(--brand);
+      }
+      .scene-title {
+        margin: 18px 0 0;
+        font-family: var(--headline);
+        font-weight: 800;
+        font-size: 74px;
+        line-height: 0.98;
+        letter-spacing: -0.035em;
+        color: var(--text-1);
+      }
+      .scene-lead {
+        margin: 22px 0 0;
+        font-size: 22px;
+        line-height: 1.5;
+        color: var(--text-2);
+        max-width: 27ch;
+      }
+      .chips {
+        margin: 34px 0 0;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        align-self: flex-start;
+        padding: 12px 18px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(19, 27, 38, 0.72);
+        font-size: 18px;
+        font-weight: 500;
+        color: var(--text-1);
+        will-change: transform, opacity;
+      }
+      .chip .tick {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--brand);
+        box-shadow: 0 0 12px rgba(242, 184, 75, 0.8);
+      }
+
+      /* Ms. Dream persona badge */
+      .dream-badge {
+        width: 64px;
+        height: 64px;
+        border-radius: 16px;
+        border: 1px solid var(--line-strong);
+        object-fit: cover;
+        margin-bottom: 20px;
+        box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
+        will-change: transform, opacity;
+      }
+
+      /* browser frame around a screenshot */
+      .frame {
+        position: relative;
+        width: 100%;
+        max-width: 1330px;
+        justify-self: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 18px;
+        background: var(--surface-1);
+        padding: 10px;
+        box-shadow:
+          0 40px 120px rgba(0, 0, 0, 0.62),
+          0 0 0 1px rgba(0, 0, 0, 0.3),
+          0 0 90px rgba(242, 184, 75, 0.08);
+        will-change: transform, opacity;
+      }
+      .frame-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 36px;
+        padding: 0 8px 10px;
+      }
+      .frame-bar .dot {
+        width: 11px;
+        height: 11px;
+        border-radius: 999px;
+        background: #2a3644;
+      }
+      .frame-url {
+        margin-left: 14px;
+        padding: 5px 14px;
+        border-radius: 7px;
+        background: var(--surface-3);
+        font-family: var(--mono);
+        font-size: 13px;
+        letter-spacing: 0.02em;
+        color: var(--text-2);
+      }
+      .frame-url b {
+        color: var(--brand);
+        font-weight: 600;
+      }
+      .shot {
+        position: relative;
+        border-radius: 11px;
+        overflow: hidden;
+        background: var(--surface-2);
+      }
+      .shot-scale {
+        display: block;
+        will-change: transform;
+      }
+      .shot-scale img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      /* ---------- brand scenes (S1 / S10) ---------- */
+      .center {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+      }
+      .mark {
+        width: 132px;
+        height: 132px;
+        border-radius: 30px;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5), 0 0 60px rgba(245, 222, 60, 0.16);
+        will-change: transform, opacity;
+      }
+      .hero-kicker {
+        margin-top: 34px;
+        font-family: var(--mono);
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: 0.3em;
+        text-transform: uppercase;
+        color: var(--brand);
+        will-change: transform, opacity;
+      }
+      .hero-title {
+        margin: 26px 0 0;
+        font-family: var(--headline);
+        font-weight: 800;
+        font-size: 118px;
+        line-height: 0.94;
+        letter-spacing: -0.045em;
+        color: var(--text-1);
+      }
+      .hero-title .amber {
+        color: var(--eye);
+      }
+      .hero-line {
+        display: block;
+        will-change: transform, opacity;
+      }
+      .hero-sub {
+        margin: 40px 0 0;
+        font-size: 24px;
+        color: var(--text-2);
+        letter-spacing: 0.01em;
+        will-change: transform, opacity;
+      }
+      .cta {
+        margin-top: 44px;
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        padding: 18px 30px;
+        border-radius: 10px;
+        background: var(--brand);
+        color: var(--brand-ink);
+        font-weight: 600;
+        font-size: 22px;
+        box-shadow: 0 18px 60px rgba(242, 184, 75, 0.28);
+        will-change: transform, opacity;
+      }
+      .footline {
+        margin-top: 30px;
+        font-family: var(--mono);
+        font-size: 15px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--text-2);
+        will-change: opacity;
+      }
+
+      /* ---------- cats scene (S4) ---------- */
+      .cats-head {
+        position: absolute;
+        top: 132px;
+        left: 0;
+        right: 0;
+        text-align: center;
+      }
+      .cats-title {
+        margin: 16px 0 0;
+        font-family: var(--headline);
+        font-weight: 800;
+        font-size: 68px;
+        letter-spacing: -0.035em;
+        color: var(--text-1);
+      }
+      .cats-row {
+        position: absolute;
+        top: 342px;
+        left: 56px;
+        right: 56px;
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 26px;
+      }
+      .cat-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        padding: 26px 16px 22px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: rgba(14, 20, 29, 0.66);
+        will-change: transform, opacity;
+      }
+      .cat-card img {
+        width: 152px;
+        height: 152px;
+        border-radius: 22px;
+        border: 1px solid var(--line-strong);
+      }
+      .cat-name {
+        font-family: var(--headline);
+        font-weight: 700;
+        font-size: 27px;
+        letter-spacing: -0.02em;
+        color: var(--text-1);
+      }
+      .cat-role {
+        font-family: var(--mono);
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--brand);
+      }
+      .cat-reads {
+        font-size: 15px;
+        color: var(--text-2);
+        text-align: center;
+      }
+
+      /* ---------- lifecycle scene (S9) ---------- */
+      .life-head {
+        position: absolute;
+        top: 168px;
+        left: 0;
+        right: 0;
+        text-align: center;
+      }
+      .life-title {
+        margin: 16px 0 0;
+        font-family: var(--headline);
+        font-weight: 800;
+        font-size: 66px;
+        letter-spacing: -0.035em;
+        color: var(--text-1);
+      }
+      .life-row {
+        position: absolute;
+        top: 430px;
+        left: 96px;
+        right: 96px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 22px;
+      }
+      .life-card {
+        position: relative;
+        padding: 34px 30px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(14, 20, 29, 0.7);
+        will-change: transform, opacity;
+      }
+      .life-stage {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-family: var(--mono);
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--text-1);
+      }
+      .life-stage .d {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: var(--line-strong);
+      }
+      .life-card.live .d {
+        background: var(--up);
+        box-shadow: 0 0 14px rgba(63, 211, 154, 0.8);
+      }
+      .life-body {
+        margin: 18px 0 0;
+        font-size: 18px;
+        line-height: 1.5;
+        color: var(--text-2);
+      }
+      .life-idx {
+        position: absolute;
+        top: 22px;
+        right: 26px;
+        font-family: var(--mono);
+        font-size: 14px;
+        color: var(--text-3);
+      }
+
+      /* landing hero settle (S2) — frame centered wider */
+      .stage-solo {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 92px 60px 60px;
+      }
+      .solo-cap {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 74px;
+        text-align: center;
+        font-size: 22px;
+        color: var(--text-2);
+        will-change: opacity;
+      }
+      .solo-cap b {
+        color: var(--text-1);
+        font-weight: 600;
+      }
+      .stage-solo .frame {
+        max-width: 1360px;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-width="1920"
+      data-height="1080"
+      data-duration="178.8"
+      data-fps="30"
+    >
+      <!-- continuous background (not a clip) -->
+      <div id="bg"></div>
+      <div id="bg-grid"></div>
+      <div id="bg-glow"></div>
+      <div id="bg-vignette"></div>
+
+      <!-- ============ S1 — COLD OPEN ============ -->
+      <section id="s1" class="clip" data-start="0" data-duration="15.6" data-track-index="1">
+        <div class="scene-inner" id="s1-in">
+          <div class="center">
+            <img class="mark" id="s1-mark" src="assets/brand/dreamcat.svg" alt="DreamCat" />
+            <p class="hero-kicker" id="s1-kicker">Binary Event Contracts · Somnia Shannon</p>
+            <h1 class="hero-title">
+              <span class="hero-line" id="s1-l1">Trade the probability,</span>
+              <span class="hero-line amber" id="s1-l2">not the price.</span>
+            </h1>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ S2 — LANDING / WHAT IT IS ============ -->
+      <section id="s2" class="clip" data-start="15.6" data-duration="12.5" data-track-index="1">
+        <div class="scene-inner" id="s2-in">
+          <div class="stage-solo">
+            <div class="frame" id="s2-frame">
+              <div class="frame-bar">
+                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                <span class="frame-url">dreamcat-somnia.vercel.app<b>/</b></span>
+              </div>
+              <div class="shot" data-layout-allow-overflow><div class="shot-scale" id="s2-shot"><img src="assets/frames/landing.png" alt="DreamCat landing" /></div></div>
+            </div>
+            <p class="solo-cap" id="s2-cap">A <b>Bloomberg-grade terminal</b> for binary event contracts on Somnia.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ S3 — TERMINAL ============ -->
+      <section id="s3" class="clip" data-start="28.1" data-duration="20" data-track-index="1">
+        <div class="scene-inner" id="s3-in">
+          <div class="stage">
+            <div class="col-copy">
+              <p class="kicker">Terminal</p>
+              <h2 class="scene-title">Read the<br />whole book.</h2>
+              <p class="scene-lead">Live depth, candlesticks, and manual order entry for a single contract.</p>
+              <div class="chips">
+                <span class="chip" id="s3-c1"><span class="tick"></span>Live order book &amp; depth</span>
+                <span class="chip" id="s3-c2"><span class="tick"></span>Candles · MA · EMA · RSI</span>
+                <span class="chip" id="s3-c3"><span class="tick"></span>Buy YES / NO from your wallet</span>
+              </div>
+            </div>
+            <div class="frame" id="s3-frame">
+              <div class="frame-bar">
+                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                <span class="frame-url">dreamcat-somnia.vercel.app<b>/terminal</b></span>
+              </div>
+              <div class="shot" data-layout-allow-overflow><div class="shot-scale" id="s3-shot" style="transform-origin:72% 40%"><img src="assets/frames/terminal.png" alt="Trading terminal" /></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ S4 — THE SIX CATS ============ -->
+      <section id="s4" class="clip" data-start="48.1" data-duration="19.6" data-track-index="1">
+        <div class="scene-inner" id="s4-in">
+          <div class="cats-head">
+            <p class="kicker" style="text-align:center">Six strategies</p>
+            <h2 class="cats-title">Six cats. Six ways to be right.</h2>
+          </div>
+          <div class="cats-row">
+            <div class="cat-card" id="s4-1">
+              <img src="assets/cats/whiskers.webp" alt="Whiskers" />
+              <div class="cat-name">Whiskers</div><div class="cat-role">Maker</div>
+              <div class="cat-reads">Trades the imbalance</div>
+            </div>
+            <div class="cat-card" id="s4-2">
+              <img src="assets/cats/pounce.webp" alt="Pounce" />
+              <div class="cat-name">Pounce</div><div class="cat-role">Momentum</div>
+              <div class="cat-reads">Chases the tape</div>
+            </div>
+            <div class="cat-card" id="s4-3">
+              <img src="assets/cats/luna.webp" alt="Luna" />
+              <div class="cat-name">Luna</div><div class="cat-role">Fade</div>
+              <div class="cat-reads">Fades the crowd</div>
+            </div>
+            <div class="cat-card" id="s4-4">
+              <img src="assets/cats/fairy.webp" alt="Fairy" />
+              <div class="cat-name">Fairy</div><div class="cat-role">Fair value</div>
+              <div class="cat-reads">Prices from scratch</div>
+            </div>
+            <div class="cat-card" id="s4-5">
+              <img src="assets/cats/theta.webp" alt="Theta" />
+              <div class="cat-name">Theta</div><div class="cat-role">Theta decay</div>
+              <div class="cat-reads">Rides the clock</div>
+            </div>
+            <div class="cat-card" id="s4-6">
+              <img src="assets/cats/mittens.webp" alt="Mittens" />
+              <div class="cat-name">Mittens</div><div class="cat-role">Market maker</div>
+              <div class="cat-reads">Quotes both sides</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ S5 — STRATEGY LAB ============ -->
+      <section id="s5" class="clip" data-start="67.7" data-duration="18.3" data-track-index="1">
+        <div class="scene-inner" id="s5-in">
+          <div class="stage">
+            <div class="col-copy">
+              <p class="kicker">Strategy Lab</p>
+              <h2 class="scene-title">Earn a cat's<br />trust.</h2>
+              <p class="scene-lead">Tune the edges, then dry-run against the live book — nothing signed.</p>
+              <div class="chips">
+                <span class="chip" id="s5-c1"><span class="tick"></span>Entry · size · TP · stop · hold</span>
+                <span class="chip" id="s5-c2"><span class="tick"></span>Swap any of the six cats</span>
+                <span class="chip" id="s5-c3"><span class="tick"></span>Paper-trades live, in real time</span>
+              </div>
+            </div>
+            <div class="frame" id="s5-frame">
+              <div class="frame-bar">
+                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                <span class="frame-url">dreamcat-somnia.vercel.app<b>/lab</b></span>
+              </div>
+              <div class="shot" data-layout-allow-overflow><div class="shot-scale" id="s5-shot" style="transform-origin:38% 46%"><img src="assets/frames/lab.png" alt="Strategy Lab" /></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ SD — MS. DREAM (STRATEGY COPILOT) ============ -->
+      <section id="sd" class="clip" data-start="86" data-duration="18.3" data-track-index="1">
+        <div class="scene-inner" id="sd-in">
+          <div class="stage">
+            <div class="col-copy">
+              <img class="dream-badge" id="sd-avatar" src="assets/cats/Dream.png" alt="Ms. Dream" />
+              <p class="kicker">Strategy Copilot</p>
+              <h2 class="scene-title">Just ask<br />Ms. Dream.</h2>
+              <p class="scene-lead">Describe the behavior you want; she proposes the exact changes.</p>
+              <div class="chips">
+                <span class="chip" id="sd-c1"><span class="tick"></span>Plain-English strategy help</span>
+                <span class="chip" id="sd-c2"><span class="tick"></span>Proposes a bounded diff</span>
+                <span class="chip" id="sd-c3"><span class="tick"></span>Nothing changes until you apply</span>
+              </div>
+            </div>
+            <div class="frame" id="sd-frame">
+              <div class="frame-bar">
+                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                <span class="frame-url">dreamcat-somnia.vercel.app<b>/lab</b></span>
+              </div>
+              <div class="shot" data-layout-allow-overflow><div class="shot-scale" id="sd-shot" style="transform-origin:82% 76%"><img src="assets/frames/copilot.png" alt="Ms. Dream strategy copilot" /></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ S6 — FLEET DECK ============ -->
+      <section id="s6" class="clip" data-start="104.3" data-duration="17.9" data-track-index="1">
+        <div class="scene-inner" id="s6-in">
+          <div class="stage">
+            <div class="col-copy">
+              <p class="kicker">Fleet Deck</p>
+              <h2 class="scene-title">Run the<br />fleet.</h2>
+              <p class="scene-lead">Deploy up to five cats side by side, each with its own capital and window.</p>
+              <div class="chips">
+                <span class="chip" id="s6-c1"><span class="tick"></span>Up to 5 cats at once</span>
+                <span class="chip" id="s6-c2"><span class="tick"></span>Separated capital per cat</span>
+                <span class="chip" id="s6-c3"><span class="tick"></span>Runs in the background · dry or live</span>
+              </div>
+            </div>
+            <div class="frame" id="s6-frame">
+              <div class="frame-bar">
+                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                <span class="frame-url">dreamcat-somnia.vercel.app<b>/fleet</b></span>
+              </div>
+              <div class="shot" data-layout-allow-overflow><div class="shot-scale" id="s6-shot" style="transform-origin:32% 44%"><img src="assets/frames/fleet.png" alt="Fleet Deck" /></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ S7 — LEADERBOARD ============ -->
+      <section id="s7" class="clip" data-start="122.2" data-duration="12.4" data-track-index="1">
+        <div class="scene-inner" id="s7-in">
+          <div class="stage">
+            <div class="col-copy">
+              <p class="kicker">Leaderboard</p>
+              <h2 class="scene-title">Clone the<br />best.</h2>
+              <p class="scene-lead">Published runs ranked by real profit and loss.</p>
+              <div class="chips">
+                <span class="chip" id="s7-c1"><span class="tick"></span>Ranked by realized PnL</span>
+                <span class="chip" id="s7-c2"><span class="tick"></span>One-click clone to your fleet</span>
+              </div>
+            </div>
+            <div class="frame" id="s7-frame">
+              <div class="frame-bar">
+                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                <span class="frame-url">dreamcat-somnia.vercel.app<b>/leaderboard</b></span>
+              </div>
+              <div class="shot" data-layout-allow-overflow><div class="shot-scale" id="s7-shot" style="transform-origin:80% 42%"><img src="assets/frames/leaderboard.png" alt="Leaderboard" /></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ S8 — INTEL HUB ============ -->
+      <section id="s8" class="clip" data-start="134.6" data-duration="16.7" data-track-index="1">
+        <div class="scene-inner" id="s8-in">
+          <div class="stage">
+            <div class="col-copy">
+              <p class="kicker">Intel Desk</p>
+              <h2 class="scene-title">Context the<br />book can't give.</h2>
+              <p class="scene-lead">News, whale prints, and the same questions priced on other venues.</p>
+              <div class="chips">
+                <span class="chip" id="s8-c1"><span class="tick"></span>Bull / bear news reads</span>
+                <span class="chip" id="s8-c2"><span class="tick"></span>Live whale prints</span>
+                <span class="chip" id="s8-c3"><span class="tick"></span>Cross-venue probability divergence</span>
+              </div>
+            </div>
+            <div class="frame" id="s8-frame">
+              <div class="frame-bar">
+                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                <span class="frame-url">dreamcat-somnia.vercel.app<b>/intel</b></span>
+              </div>
+              <div class="shot" data-layout-allow-overflow><div class="shot-scale" id="s8-shot" style="transform-origin:86% 40%"><img src="assets/frames/intel.png" alt="Intel Hub" /></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ S9 — LIFECYCLE ============ -->
+      <section id="s9" class="clip" data-start="151.3" data-duration="12.3" data-track-index="1">
+        <div class="scene-inner" id="s9-in">
+          <div class="life-head">
+            <p class="kicker" style="text-align:center">Contract lifecycle</p>
+            <h2 class="life-title">A window, then an answer.</h2>
+          </div>
+          <div class="life-row">
+            <div class="life-card live" id="s9-1">
+              <span class="life-idx">01</span>
+              <div class="life-stage"><span class="d"></span>Trading</div>
+              <p class="life-body">The window is open — the only state that accepts an order.</p>
+            </div>
+            <div class="life-card" id="s9-2">
+              <span class="life-idx">02</span>
+              <div class="life-stage"><span class="d"></span>Close</div>
+              <p class="life-body">The window expires. The book stops.</p>
+            </div>
+            <div class="life-card" id="s9-3">
+              <span class="life-idx">03</span>
+              <div class="life-stage"><span class="d"></span>Resolve</div>
+              <p class="life-body">The oracle settles it. One side is worth a dollar.</p>
+            </div>
+            <div class="life-card" id="s9-4">
+              <span class="life-idx">04</span>
+              <div class="life-stage"><span class="d"></span>Claim</div>
+              <p class="life-body">Winnings wait on the contract until you claim them.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ S10 — OUTRO / CTA ============ -->
+      <section id="s10" class="clip" data-start="163.6" data-duration="15.2" data-track-index="1">
+        <div class="scene-inner" id="s10-in">
+          <div class="center">
+            <img class="mark" id="s10-mark" src="assets/brand/dreamcat.svg" alt="DreamCat" />
+            <h1 class="hero-title" style="font-size:96px;margin-top:30px">
+              <span class="hero-line" id="s10-l1">Six cats. Five screens.</span>
+              <span class="hero-line amber" id="s10-l2">One signal.</span>
+            </h1>
+            <p class="hero-sub" id="s10-sub">The window is already open.</p>
+            <div class="cta" id="s10-cta">Open the terminal <span aria-hidden="true">↗</span></div>
+            <p class="footline" id="s10-foot">Somnia Shannon testnet · DreamDEX Event Contracts Hackathon</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ AUDIO ============ -->
+      <!-- music bed (track 10) -->
+      <audio id="music" data-start="0" data-duration="178.8" data-track-index="10" src="assets/music/bed.mp3"></audio>
+
+      <!-- voiceover (track 11) -->
+      <audio id="vo1" data-start="1.3" data-duration="12.373" data-track-index="11" src="assets/vo/s1.wav"></audio>
+      <audio id="vo2" data-start="16.6" data-duration="9.664" data-track-index="11" src="assets/vo/s2.wav"></audio>
+      <audio id="vo3" data-start="29.1" data-duration="16.896" data-track-index="11" src="assets/vo/s3.wav"></audio>
+      <audio id="vo4" data-start="49.1" data-duration="16.576" data-track-index="11" src="assets/vo/s4.wav"></audio>
+      <audio id="vo5" data-start="68.7" data-duration="15.466" data-track-index="11" src="assets/vo/s5.wav"></audio>
+      <audio id="vosd" data-start="87.0" data-duration="15.36" data-track-index="11" src="assets/vo/sdream.wav"></audio>
+      <audio id="vo6" data-start="105.3" data-duration="14.848" data-track-index="11" src="assets/vo/s6.wav"></audio>
+      <audio id="vo7" data-start="123.2" data-duration="9.6" data-track-index="11" src="assets/vo/s7.wav"></audio>
+      <audio id="vo8" data-start="135.6" data-duration="13.781" data-track-index="11" src="assets/vo/s8.wav"></audio>
+      <audio id="vo9" data-start="152.2" data-duration="9.557" data-track-index="11" src="assets/vo/s9.wav"></audio>
+      <audio id="vo10" data-start="164.6" data-duration="11.157" data-track-index="11" src="assets/vo/s10.wav"></audio>
+
+      <!-- sfx: bells & impacts (track 12) -->
+      <audio id="sfx-b1" data-start="1.15" data-duration="1.48" data-track-index="12" data-volume="0.5" src="assets/sfx/impact/impactBell_heavy_000.ogg"></audio>
+      <audio id="sfx-b2" data-start="15.75" data-duration="0.118" data-track-index="12" data-volume="0.4" src="assets/sfx/impact/impactSoft_medium_000.ogg"></audio>
+      <audio id="sfx-bd" data-start="86.5" data-duration="0.183" data-track-index="12" data-volume="0.42" src="assets/sfx/impact/impactSoft_medium_001.ogg"></audio>
+      <audio id="sfx-b7" data-start="126.8" data-duration="1.48" data-track-index="12" data-volume="0.5" src="assets/sfx/impact/impactBell_heavy_000.ogg"></audio>
+      <audio id="sfx-b10" data-start="164.0" data-duration="0.653" data-track-index="12" data-volume="0.55" src="assets/sfx/impact/impactBell_heavy_003.ogg"></audio>
+
+      <!-- sfx: drops / switch (track 13) -->
+      <audio id="sfx-d1" data-start="30.5" data-duration="0.109" data-track-index="13" data-volume="0.45" src="assets/sfx/interface/drop_001.ogg"></audio>
+      <audio id="sfx-d2" data-start="31.4" data-duration="0.109" data-track-index="13" data-volume="0.45" src="assets/sfx/interface/drop_001.ogg"></audio>
+      <audio id="sfx-d3" data-start="32.3" data-duration="0.109" data-track-index="13" data-volume="0.45" src="assets/sfx/interface/drop_001.ogg"></audio>
+      <audio id="sfx-sw" data-start="75.7" data-duration="0.617" data-track-index="13" data-volume="0.5" src="assets/sfx/interface/switch_001.ogg"></audio>
+      <audio id="sfx-dd" data-start="95.5" data-duration="0.191" data-track-index="13" data-volume="0.45" src="assets/sfx/interface/drop_002.ogg"></audio>
+      <audio id="sfx-d6" data-start="106.3" data-duration="0.191" data-track-index="13" data-volume="0.42" src="assets/sfx/interface/drop_002.ogg"></audio>
+      <audio id="sfx-d8" data-start="142.3" data-duration="0.191" data-track-index="13" data-volume="0.45" src="assets/sfx/interface/drop_002.ogg"></audio>
+
+      <!-- sfx: cat deals (tracks 14-19) -->
+      <audio id="sfx-c1" data-start="53.7" data-duration="0.6" data-track-index="14" data-volume="0.5" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+      <audio id="sfx-c2" data-start="55.5" data-duration="0.584" data-track-index="15" data-volume="0.5" src="assets/sfx/casino/card-slide-2.ogg"></audio>
+      <audio id="sfx-c3" data-start="57.3" data-duration="0.598" data-track-index="16" data-volume="0.5" src="assets/sfx/casino/card-slide-3.ogg"></audio>
+      <audio id="sfx-c4" data-start="59.1" data-duration="0.459" data-track-index="17" data-volume="0.5" src="assets/sfx/casino/card-slide-4.ogg"></audio>
+      <audio id="sfx-c5" data-start="60.9" data-duration="0.6" data-track-index="18" data-volume="0.5" src="assets/sfx/casino/card-slide-5.ogg"></audio>
+      <audio id="sfx-c6" data-start="62.7" data-duration="0.6" data-track-index="19" data-volume="0.5" src="assets/sfx/casino/card-slide-6.ogg"></audio>
+
+      <!-- sfx: lifecycle ticks (tracks 20-23) -->
+      <audio id="sfx-t1" data-start="152.3" data-duration="0.046" data-track-index="20" data-volume="0.34" src="assets/sfx/interface/select_008.ogg"></audio>
+      <audio id="sfx-t2" data-start="153.9" data-duration="0.046" data-track-index="21" data-volume="0.34" src="assets/sfx/interface/select_008.ogg"></audio>
+      <audio id="sfx-t3" data-start="155.5" data-duration="0.046" data-track-index="22" data-volume="0.34" src="assets/sfx/interface/select_008.ogg"></audio>
+      <audio id="sfx-t4" data-start="157.1" data-duration="0.046" data-track-index="23" data-volume="0.34" src="assets/sfx/interface/select_008.ogg"></audio>
+    </div>
+
+    <script>
+      function buildTimeline() {
+        const tl = gsap.timeline({ paused: true });
+        const E = "power3.out";
+        const EO = "power4.out";
+
+        const S = {
+          s1: 0, s2: 15.6, s3: 28.1, s4: 48.1, s5: 67.7, sd: 86,
+          s6: 104.3, s7: 122.2, s8: 134.6, s9: 151.3, s10: 163.6,
+        };
+        const D = {
+          s1: 15.6, s2: 12.5, s3: 20, s4: 19.6, s5: 18.3, sd: 18.3,
+          s6: 17.9, s7: 12.4, s8: 16.7, s9: 12.3, s10: 15.2,
+        };
+
+        // --- continuous background life ---
+        tl.fromTo("#bg-glow", { opacity: 0.55, scale: 1.04 }, { opacity: 1, scale: 1, duration: 4, ease: "sine.inOut" }, 0);
+        tl.to("#bg-glow", { opacity: 0.82, duration: 10, ease: "sine.inOut", yoyo: true, repeat: 16 }, 4);
+        tl.fromTo("#bg-grid", { opacity: 0 }, { opacity: 0.5, duration: 3, ease: "sine.out" }, 0.3);
+
+        // generic scene-inner dissolve (in at start, out just before end)
+        function dissolve(id, s, d) {
+          tl.fromTo("#" + id, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.55, ease: "sine.out" }, s);
+          tl.to("#" + id, { autoAlpha: 0, duration: 0.4, ease: "sine.in" }, s + d - 0.45);
+        }
+        ["s1","s2","s3","s4","s5","sd","s6","s7","s8","s9","s10"].forEach((k) => dissolve(k + "-in", S[k], D[k]));
+
+        // product scene copy + frame choreography
+        function productScene(k, chips) {
+          const s = S[k];
+          tl.fromTo("#" + k + "-in .kicker", { y: 18, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.6, ease: E }, s + 0.35);
+          tl.fromTo("#" + k + "-in .scene-title", { y: 30, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.7, ease: EO }, s + 0.5);
+          tl.fromTo("#" + k + "-in .scene-lead", { y: 22, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.6, ease: E }, s + 0.78);
+          tl.fromTo("#" + k + "-frame", { scale: 0.955, y: 26, autoAlpha: 0 }, { scale: 1, y: 0, autoAlpha: 1, duration: 0.95, ease: EO }, s + 0.42);
+          tl.fromTo("#" + k + "-shot", { scale: 1.075 }, { scale: 1.0, duration: D[k] - 0.5, ease: "sine.inOut" }, s + 0.4);
+          chips.forEach((c, i) => {
+            tl.fromTo("#" + c, { x: -20, autoAlpha: 0 }, { x: 0, autoAlpha: 1, duration: 0.5, ease: E }, s + 1.2 + i * 0.9);
+          });
+        }
+        productScene("s3", ["s3-c1", "s3-c2", "s3-c3"]);
+        productScene("s5", ["s5-c1", "s5-c2", "s5-c3"]);
+        productScene("sd", ["sd-c1", "sd-c2", "sd-c3"]);
+        productScene("s6", ["s6-c1", "s6-c2", "s6-c3"]);
+        productScene("s7", ["s7-c1", "s7-c2"]);
+        productScene("s8", ["s8-c1", "s8-c2", "s8-c3"]);
+
+        // Ms. Dream avatar badge
+        tl.fromTo("#sd-avatar", { scale: 0.8, autoAlpha: 0, y: 6 }, { scale: 1, autoAlpha: 1, y: 0, duration: 0.7, ease: "back.out(1.5)" }, S.sd + 0.3);
+
+        // --- S1 cold open ---
+        tl.fromTo("#s1-mark", { scale: 0.82, autoAlpha: 0, y: 8 }, { scale: 1, autoAlpha: 1, y: 0, duration: 1.0, ease: "back.out(1.5)" }, 0.55);
+        tl.fromTo("#s1-kicker", { y: 16, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.7, ease: E }, 1.05);
+        tl.fromTo("#s1-l1", { y: 30, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.8, ease: EO }, 1.35);
+        tl.fromTo("#s1-l2", { y: 30, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.9, ease: EO }, 1.75);
+        tl.fromTo("#s1-mark", { filter: "drop-shadow(0 0 0px rgba(245,222,60,0))" }, { filter: "drop-shadow(0 0 26px rgba(245,222,60,0.35))", duration: 2.4, ease: "sine.inOut", yoyo: true, repeat: 3 }, 2.2);
+
+        // --- S2 landing ---
+        tl.fromTo("#s2-frame", { scale: 0.94, y: 34, autoAlpha: 0 }, { scale: 1, y: 0, autoAlpha: 1, duration: 1.0, ease: EO }, S.s2 + 0.35);
+        tl.fromTo("#s2-shot", { scale: 1.07 }, { scale: 1.0, duration: D.s2 - 0.5, ease: "sine.inOut" }, S.s2 + 0.4);
+        tl.fromTo("#s2-cap", { y: 18, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.7, ease: E }, S.s2 + 1.1);
+
+        // --- S4 cats ---
+        tl.fromTo("#s4-in .kicker", { y: 16, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.6, ease: E }, S.s4 + 0.4);
+        tl.fromTo("#s4-in .cats-title", { y: 26, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.7, ease: EO }, S.s4 + 0.55);
+        const catStart = S.s4 + 5.6;
+        for (let i = 1; i <= 6; i++) {
+          tl.fromTo("#s4-" + i, { y: 40, autoAlpha: 0, scale: 0.9 }, { y: 0, autoAlpha: 1, scale: 1, duration: 0.6, ease: "back.out(1.4)" }, catStart + (i - 1) * 1.8);
+        }
+
+        // --- S9 lifecycle ---
+        tl.fromTo("#s9-in .kicker", { y: 16, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.6, ease: E }, S.s9 + 0.4);
+        tl.fromTo("#s9-in .life-title", { y: 26, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.7, ease: EO }, S.s9 + 0.55);
+        for (let i = 1; i <= 4; i++) {
+          tl.fromTo("#s9-" + i, { y: 34, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.55, ease: E }, S.s9 + 1.0 + (i - 1) * 1.6);
+        }
+
+        // --- S10 outro ---
+        tl.fromTo("#s10-mark", { scale: 0.85, autoAlpha: 0 }, { scale: 1, autoAlpha: 1, duration: 0.9, ease: "back.out(1.5)" }, S.s10 + 0.5);
+        tl.fromTo("#s10-l1", { y: 26, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.7, ease: EO }, S.s10 + 1.0);
+        tl.fromTo("#s10-l2", { y: 26, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.8, ease: EO }, S.s10 + 1.35);
+        tl.fromTo("#s10-sub", { y: 20, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.7, ease: E }, S.s10 + 2.1);
+        tl.fromTo("#s10-cta", { y: 18, autoAlpha: 0, scale: 0.96 }, { y: 0, autoAlpha: 1, scale: 1, duration: 0.6, ease: "back.out(1.4)" }, S.s10 + 2.7);
+        tl.fromTo("#s10-foot", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.7, ease: "sine.out" }, S.s10 + 3.3);
+        tl.to("#s10-cta", { boxShadow: "0 18px 70px rgba(242,184,75,0.5)", duration: 1.3, ease: "sine.inOut", yoyo: true, repeat: 3 }, S.s10 + 3.4);
+
+        // --- music volume automation (baseline gain 1, shaped by tweens) ---
+        tl.set("#music", { volume: 0 }, 0);
+        tl.to("#music", { volume: 0.3, duration: 1.2, ease: "sine.out" }, 0);
+        tl.to("#music", { volume: 0.14, duration: 0.7, ease: "sine.inOut" }, 1.4);
+        tl.to("#music", { volume: 0.3, duration: 1.0, ease: "sine.inOut" }, 175.8);
+        tl.to("#music", { volume: 0, duration: 2.0, ease: "sine.in" }, 176.8);
+
+        window.__timelines["main"] = tl;
+        if (window.__hfForceTimelineRebind) window.__hfForceTimelineRebind();
+      }
+
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(buildTimeline);
+      } else {
+        buildTimeline();
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+Trade the probability, not the price. 🐱📈
+
+DreamCat is a Bloomberg-grade terminal for BTC/ETH binary event contracts on @Somnia_Network — read the live order book yourself, or deploy a fleet of six strategy cats that read it for you.
+
+→ Terminal: live book, candles + indicators, YES/NO orders from your wallet
+→ Lab: tune a cat, dry-run it against the live book — nothing signed
+→ Fleet: run up to 5 cats at once, separated capital, dry or live
+→ Board: clone the best runs in one click
+→ Intel: news, whale prints, cross-venue probability divergence
+
+Built for the Somnia × DreamDEX Event Contracts Hackathon. The window is already open.
+
+#DreamDEX #Somnia #PredictionMarkets
